@@ -17,9 +17,9 @@ final class SleepMapperTests: XCTestCase {
             startDate: Date(timeIntervalSince1970: 1_700_000_000),
             endDate: Date(timeIntervalSince1970: 1_700_028_000),
             stages: [
-                SleepStage(stage: "asleepCore", startDate: Date(timeIntervalSince1970: 1_700_001_000), endDate: Date(timeIntervalSince1970: 1_700_010_000)),
-                SleepStage(stage: "asleepDeep", startDate: Date(timeIntervalSince1970: 1_700_010_000), endDate: Date(timeIntervalSince1970: 1_700_018_000)),
-                SleepStage(stage: "asleepREM", startDate: Date(timeIntervalSince1970: 1_700_018_000), endDate: Date(timeIntervalSince1970: 1_700_025_000)),
+                SleepStage(uuid: "SLP00001-0000-0000-0000-000000000000", stage: "asleepCore", startDate: Date(timeIntervalSince1970: 1_700_001_000), endDate: Date(timeIntervalSince1970: 1_700_010_000)),
+                SleepStage(uuid: "SLP00002-0000-0000-0000-000000000000", stage: "asleepDeep", startDate: Date(timeIntervalSince1970: 1_700_010_000), endDate: Date(timeIntervalSince1970: 1_700_018_000)),
+                SleepStage(uuid: "SLP00003-0000-0000-0000-000000000000", stage: "asleepREM", startDate: Date(timeIntervalSince1970: 1_700_018_000), endDate: Date(timeIntervalSince1970: 1_700_025_000)),
             ]
         )
 

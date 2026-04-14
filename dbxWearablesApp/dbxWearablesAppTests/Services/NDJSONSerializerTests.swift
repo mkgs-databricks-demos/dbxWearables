@@ -6,6 +6,7 @@ final class NDJSONSerializerTests: XCTestCase {
     func testEncodeProducesOneLinePerRecord() throws {
         let samples = [
             HealthSample(
+                uuid: "A1B2C3D4-0001-0000-0000-000000000000",
                 type: "HKQuantityTypeIdentifierStepCount",
                 value: 1243,
                 unit: "count",
@@ -16,6 +17,7 @@ final class NDJSONSerializerTests: XCTestCase {
                 metadata: nil
             ),
             HealthSample(
+                uuid: "A1B2C3D4-0002-0000-0000-000000000000",
                 type: "HKQuantityTypeIdentifierHeartRate",
                 value: 72,
                 unit: "count/min",
@@ -46,6 +48,7 @@ final class NDJSONSerializerTests: XCTestCase {
 
     func testEachLineContainsExpectedFields() throws {
         let sample = HealthSample(
+            uuid: "A1B2C3D4-0003-0000-0000-000000000000",
             type: "HKQuantityTypeIdentifierStepCount",
             value: 500,
             unit: "count",

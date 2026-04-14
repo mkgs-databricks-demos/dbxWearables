@@ -55,6 +55,7 @@ enum SleepMapper {
 
         let stages = sessionSamples.map { sample in
             SleepStage(
+                uuid: sample.uuid.uuidString,
                 stage: sleepStageName(for: sample.value),
                 startDate: sample.startDate,
                 endDate: sample.endDate

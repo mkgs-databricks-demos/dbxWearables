@@ -2,6 +2,8 @@ import Foundation
 
 /// A workout session, mapped from HKWorkout.
 struct WorkoutRecord: Codable {
+    /// HealthKit sample UUID — stable identifier used for deduplication and delete matching.
+    let uuid: String
     let activityType: String
     let activityTypeRaw: UInt
     let startDate: Date
@@ -13,6 +15,7 @@ struct WorkoutRecord: Codable {
     let metadata: [String: String]?
 
     enum CodingKeys: String, CodingKey {
+        case uuid
         case activityType = "activity_type"
         case activityTypeRaw = "activity_type_raw"
         case startDate = "start_date"

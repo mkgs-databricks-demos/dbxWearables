@@ -10,6 +10,7 @@ final class WorkoutMapperTests: XCTestCase {
 
     func testWorkoutRecordEncodesToNDJSON() throws {
         let record = WorkoutRecord(
+            uuid: "W0RKOUT1-0000-0000-0000-000000000000",
             activityType: "running",
             activityTypeRaw: 37,
             startDate: Date(timeIntervalSince1970: 1_700_000_000),

@@ -13,6 +13,7 @@ enum HealthSampleMapper {
         let value = sample.quantity.doubleValue(for: unit)
 
         return HealthSample(
+            uuid: sample.uuid.uuidString,
             type: quantityType.identifier,
             value: value,
             unit: unit.unitString,
@@ -36,6 +37,7 @@ enum HealthSampleMapper {
     /// Category values are integer enums — stored as the numeric value with unit "category".
     static func map(_ sample: HKCategorySample) -> HealthSample {
         HealthSample(
+            uuid: sample.uuid.uuidString,
             type: sample.categoryType.identifier,
             value: Double(sample.value),
             unit: "category",

@@ -108,8 +108,11 @@ final class SyncCoordinator: ObservableObject {
             }
 
             let mapped = transform(result.samples)
+            let deletions = result.deletedObjects.map {
+                DeletionRecord(uuid: $0.uuid.uuidString, sampleType: sampleType.identifier)
+            }
 
-            if mapped.isEmpty {
+            if mapped.isEmpty && deletions.isEmpty {
                 // No records in this batch — advance anchor and we're done for this type.
                 if let newAnchor = result.newAnchor {
                     syncStateRepository.saveAnchor(newAnchor, for: sampleType)
@@ -117,16 +120,29 @@ final class SyncCoordinator: ObservableObject {
                 break
             }
 
-            // POST this batch, with one retry for retryable errors (429, 5xx).
-            let posted = await postBatchWithRetry(
-                mapped,
-                recordType: recordType,
-                label: sampleType.identifier
-            )
+            // POST new/updated records.
+            if !mapped.isEmpty {
+                let posted = await postBatchWithRetry(
+                    mapped,
+                    recordType: recordType,
+                    label: sampleType.identifier
+                )
+                guard posted else { break }
+            }
 
-            guard posted else {
-                // Upload failed — stop looping. Previously completed batches are safe.
-                break
+            // POST deletions for this batch.
+            if !deletions.isEmpty {
+                let posted = await postBatchWithRetry(
+                    deletions,
+                    recordType: "deletes",
+                    label: "\(sampleType.identifier)/deletes"
+                )
+                if !posted {
+                    Log.sync.warning("\(sampleType.identifier): deletion POST failed, will retry next sync")
+                    // Don't break — the records POST succeeded, but we won't advance
+                    // the anchor so deletions are re-sent next time.
+                    break
+                }
             }
 
             // Persist anchor immediately — this batch is committed.
@@ -165,16 +181,26 @@ final class SyncCoordinator: ObservableObject {
             )
 
             let mapped = SleepMapper.mapSleepSamples(result.samples)
+            let deletions = result.deletedObjects.map {
+                DeletionRecord(uuid: $0.uuid.uuidString, sampleType: sleepType.identifier)
+            }
 
-            if mapped.isEmpty {
+            if mapped.isEmpty && deletions.isEmpty {
                 if let newAnchor = result.newAnchor {
                     syncStateRepository.saveAnchor(newAnchor, for: sleepType)
                 }
                 return 0
             }
 
-            let posted = await postBatchWithRetry(mapped, recordType: "sleep", label: "sleep")
-            guard posted else { return 0 }
+            if !mapped.isEmpty {
+                let posted = await postBatchWithRetry(mapped, recordType: "sleep", label: "sleep")
+                guard posted else { return 0 }
+            }
+
+            if !deletions.isEmpty {
+                let posted = await postBatchWithRetry(deletions, recordType: "deletes", label: "sleep/deletes")
+                guard posted else { return 0 }
+            }
 
             if let newAnchor = result.newAnchor {
                 syncStateRepository.saveAnchor(newAnchor, for: sleepType)

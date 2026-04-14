@@ -6,6 +6,7 @@ enum WorkoutMapper {
 
     static func map(_ workout: HKWorkout) -> WorkoutRecord {
         WorkoutRecord(
+            uuid: workout.uuid.uuidString,
             activityType: workout.workoutActivityType.name,
             activityTypeRaw: workout.workoutActivityType.rawValue,
             startDate: workout.startDate,
