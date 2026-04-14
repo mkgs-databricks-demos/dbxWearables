@@ -19,7 +19,7 @@ final class DashboardViewModel: ObservableObject {
     func syncNow() async {
         isSyncing = true
         let coordinator = appDelegate.syncCoordinator
-        await coordinator.sync()
+        await coordinator.sync(context: .foreground)
         lastSyncDate = coordinator.lastSyncDate
         lastSyncRecordCount = coordinator.lastSyncRecordCount
         isSyncing = false

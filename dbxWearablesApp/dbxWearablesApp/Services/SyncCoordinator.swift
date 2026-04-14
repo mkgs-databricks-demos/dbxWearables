@@ -30,28 +30,33 @@ final class SyncCoordinator: ObservableObject {
 
     /// Run a full sync cycle for all configured HealthKit types.
     /// Each type is queried, posted, and its anchor persisted independently.
-    func sync() async {
+    ///
+    /// - Parameter context: `.foreground` when the user triggers sync from the UI (no time
+    ///   limit, larger batches); `.background` when triggered by an observer query (~30s
+    ///   execution window, smaller batches to maximize per-type progress).
+    func sync(context: SyncContext = .background) async {
         await MainActor.run { isSyncing = true }
         defer { Task { @MainActor in isSyncing = false } }
 
+        let batchSize = HealthKitConfiguration.queryBatchSize(for: context)
         var totalRecords = 0
 
         // Quantity types — one POST per type (stepCount, heartRate, etc.)
         for quantityType in HealthKitConfiguration.quantityTypes {
-            totalRecords += await syncSampleType(quantityType, recordType: "samples") { samples in
+            totalRecords += await syncSampleType(quantityType, batchSize: batchSize, recordType: "samples") { samples in
                 HealthSampleMapper.mapQuantitySamples(samples)
             }
         }
 
         // Stand hour — category type, mapped as a HealthSample
         let standHourType = HKCategoryType(.appleStandHour)
-        totalRecords += await syncSampleType(standHourType, recordType: "samples") { samples in
+        totalRecords += await syncSampleType(standHourType, batchSize: batchSize, recordType: "samples") { samples in
             HealthSampleMapper.mapCategorySamples(samples)
         }
 
         // Workouts
         let workoutType = HKSeriesType.workoutType()
-        totalRecords += await syncSampleType(workoutType, recordType: "workouts") { samples in
+        totalRecords += await syncSampleType(workoutType, batchSize: batchSize, recordType: "workouts") { samples in
             WorkoutMapper.mapWorkouts(samples)
         }
 
@@ -73,10 +78,10 @@ final class SyncCoordinator: ObservableObject {
 
     /// Generic batched sync for any anchored sample type.
     ///
-    /// Loops in batches of `HealthKitConfiguration.queryBatchSize`:
+    /// Loops in batches of the given `batchSize`:
     /// 1. Query up to N samples from the current anchor
     /// 2. Map HKSample objects to Encodable models via the provided transform
-    /// 3. POST as NDJSON (~125 KB per batch — fast even on cellular)
+    /// 3. POST as NDJSON
     /// 4. Persist the new anchor
     /// 5. If the batch was full (count == limit), there may be more — loop again
     ///
@@ -86,12 +91,12 @@ final class SyncCoordinator: ObservableObject {
     /// Returns the total number of records uploaded across all batches.
     private func syncSampleType<T: Encodable>(
         _ sampleType: HKSampleType,
+        batchSize: Int,
         recordType: String,
         transform: ([HKSample]) -> [T]
     ) async -> Int {
         var currentAnchor = syncStateRepository.anchor(for: sampleType)
         var totalUploaded = 0
-        let batchSize = HealthKitConfiguration.queryBatchSize
 
         while true {
             // Query the next batch

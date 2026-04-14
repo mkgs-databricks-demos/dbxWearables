@@ -1,5 +1,12 @@
 import HealthKit
 
+/// Whether the sync is running while the user has the app open (foreground)
+/// or during a background execution window (~30s).
+enum SyncContext {
+    case foreground
+    case background
+}
+
 /// Defines which HealthKit data types the app reads and syncs.
 enum HealthKitConfiguration {
 
@@ -46,9 +53,18 @@ enum HealthKitConfiguration {
     /// Background delivery frequency for observer queries.
     static let backgroundDeliveryFrequency: HKUpdateFrequency = .hourly
 
-    /// Maximum number of samples per anchored query batch.
-    /// Each batch becomes one NDJSON POST. At ~250 bytes per sample, 500 records ≈ 125 KB —
-    /// fast to serialize and upload even on cellular, well within the ~30s background window.
-    /// HealthKit returns a new anchor after each batch so progress is incremental.
-    static let queryBatchSize = 500
+    /// Maximum number of samples per anchored query batch, depending on execution context.
+    ///
+    /// **Background (~30s window):** 500 records per batch (~125 KB). Small enough that
+    /// multiple types can each complete at least one batch before time expires.
+    ///
+    /// **Foreground (no time limit):** 2000 records per batch (~500 KB). Clears backlogs
+    /// faster when the user has the app open — fewer round trips, same incremental anchor
+    /// safety since each batch is still an independent commit point.
+    static func queryBatchSize(for context: SyncContext) -> Int {
+        switch context {
+        case .foreground: return 2_000
+        case .background: return 500
+        }
+    }
 }
