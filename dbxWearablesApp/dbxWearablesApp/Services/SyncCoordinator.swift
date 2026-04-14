@@ -2,10 +2,12 @@ import Foundation
 import HealthKit
 import OSLog
 
-/// Orchestrates the sync cycle: query HealthKit → map to models → serialize NDJSON → POST → update anchors.
+/// Orchestrates the sync cycle: query HealthKit → map to models → serialize NDJSON → POST → update anchor.
 ///
-/// Each record type (samples, workouts, sleep, activity summaries) is synced independently.
-/// Anchors are persisted only after a successful upload so failed syncs are automatically retried.
+/// Each sample type is synced independently with its own query → POST → anchor-persist cycle.
+/// This means each type makes independent progress within a background execution window (~30s).
+/// If time runs out after syncing 6 of 14 types, those 6 are done — the next wake picks up
+/// the remaining 8 from their last anchors.
 final class SyncCoordinator: ObservableObject {
 
     private let queryService: HealthKitQueryService
@@ -27,14 +29,39 @@ final class SyncCoordinator: ObservableObject {
     }
 
     /// Run a full sync cycle for all configured HealthKit types.
+    /// Each type is queried, posted, and its anchor persisted independently.
     func sync() async {
         await MainActor.run { isSyncing = true }
         defer { Task { @MainActor in isSyncing = false } }
 
         var totalRecords = 0
-        totalRecords += await syncQuantityTypes()
-        totalRecords += await syncCategoryTypes()
-        totalRecords += await syncWorkouts()
+
+        // Quantity types — one POST per type (stepCount, heartRate, etc.)
+        for quantityType in HealthKitConfiguration.quantityTypes {
+            totalRecords += await syncSampleType(quantityType, recordType: "samples") { samples in
+                HealthSampleMapper.mapQuantitySamples(samples)
+            }
+        }
+
+        // Stand hour — category type, mapped as a HealthSample
+        let standHourType = HKCategoryType(.appleStandHour)
+        totalRecords += await syncSampleType(standHourType, recordType: "samples") { samples in
+            HealthSampleMapper.mapCategorySamples(samples)
+        }
+
+        // Workouts
+        let workoutType = HKSeriesType.workoutType()
+        totalRecords += await syncSampleType(workoutType, recordType: "workouts") { samples in
+            WorkoutMapper.mapWorkouts(samples)
+        }
+
+        // Sleep — stage samples grouped into sessions
+        let sleepType = HKCategoryType(.sleepAnalysis)
+        totalRecords += await syncSampleType(sleepType, recordType: "sleep") { samples in
+            SleepMapper.mapSleepSamples(samples)
+        }
+
+        // Activity summaries — date-range query (no anchored query support)
         totalRecords += await syncActivitySummaries()
 
         await MainActor.run {
@@ -43,118 +70,52 @@ final class SyncCoordinator: ObservableObject {
         }
     }
 
-    // MARK: - Quantity types (stepCount, heartRate, etc.)
+    // MARK: - Per-type sync
 
-    /// Query all configured quantity types via anchored queries, map to HealthSample,
-    /// POST as NDJSON, and persist anchors on success. Returns the number of records uploaded.
-    private func syncQuantityTypes() async -> Int {
-        var allSamples: [HealthSample] = []
-        var pendingAnchors: [(HKSampleType, HKQueryAnchor)] = []
+    /// Generic sync for any anchored sample type.
+    /// 1. Load persisted anchor (nil on first sync → fetches all history)
+    /// 2. Run anchored query to get new samples
+    /// 3. Map HKSample objects to Encodable models via the provided transform
+    /// 4. POST as NDJSON
+    /// 5. Persist the new anchor on success
+    ///
+    /// Returns the number of records uploaded.
+    private func syncSampleType<T: Encodable>(
+        _ sampleType: HKSampleType,
+        recordType: String,
+        transform: ([HKSample]) -> [T]
+    ) async -> Int {
+        let currentAnchor = syncStateRepository.anchor(for: sampleType)
 
-        for quantityType in HealthKitConfiguration.quantityTypes {
-            let currentAnchor = syncStateRepository.anchor(for: quantityType)
-
-            do {
-                let result = try await queryService.fetchNewSamples(
-                    for: quantityType,
-                    anchor: currentAnchor
-                )
-                let mapped = HealthSampleMapper.mapQuantitySamples(result.samples)
-                allSamples.append(contentsOf: mapped)
-
-                if let newAnchor = result.newAnchor {
-                    pendingAnchors.append((quantityType, newAnchor))
-                }
-                Log.sync.info("Fetched \(mapped.count) new samples for \(quantityType.identifier)")
-            } catch {
-                Log.sync.error("Query failed for \(quantityType.identifier): \(error.localizedDescription)")
-            }
-        }
-
-        return await postAndPersistAnchors(allSamples, recordType: "samples", pendingAnchors: pendingAnchors)
-    }
-
-    // MARK: - Category types (appleStandHour — sleep handled separately)
-
-    /// Query non-sleep category types via anchored queries. Sleep is excluded here
-    /// because it requires stage grouping logic handled by syncSleep().
-    private func syncCategoryTypes() async -> Int {
-        let standHourType = HKCategoryType(.appleStandHour)
-        var allSamples: [HealthSample] = []
-        var pendingAnchors: [(HKSampleType, HKQueryAnchor)] = []
-
-        let currentAnchor = syncStateRepository.anchor(for: standHourType)
-
+        let result: (samples: [HKSample], deletedObjects: [HKDeletedObject], newAnchor: HKQueryAnchor?)
         do {
-            let result = try await queryService.fetchNewSamples(
-                for: standHourType,
-                anchor: currentAnchor
-            )
-            let mapped = HealthSampleMapper.mapCategorySamples(result.samples)
-            allSamples.append(contentsOf: mapped)
-
-            if let newAnchor = result.newAnchor {
-                pendingAnchors.append((standHourType, newAnchor))
-            }
-            Log.sync.info("Fetched \(mapped.count) new stand hour samples")
+            result = try await queryService.fetchNewSamples(for: sampleType, anchor: currentAnchor)
         } catch {
-            Log.sync.error("Stand hour query failed: \(error.localizedDescription)")
-        }
-
-        return await postAndPersistAnchors(allSamples, recordType: "samples", pendingAnchors: pendingAnchors)
-    }
-
-    // MARK: - Workouts
-
-    /// Query workouts via anchored query, map to WorkoutRecord, POST as NDJSON.
-    private func syncWorkouts() async -> Int {
-        let workoutType = HKSeriesType.workoutType()
-        let currentAnchor = syncStateRepository.anchor(for: workoutType)
-        var pendingAnchors: [(HKSampleType, HKQueryAnchor)] = []
-
-        do {
-            let result = try await queryService.fetchNewSamples(
-                for: workoutType,
-                anchor: currentAnchor
-            )
-            let mapped = WorkoutMapper.mapWorkouts(result.samples)
-
-            if let newAnchor = result.newAnchor {
-                pendingAnchors.append((workoutType, newAnchor))
-            }
-            Log.sync.info("Fetched \(mapped.count) new workouts")
-
-            return await postAndPersistAnchors(mapped, recordType: "workouts", pendingAnchors: pendingAnchors)
-        } catch {
-            Log.sync.error("Workout query failed: \(error.localizedDescription)")
+            Log.sync.error("Query failed for \(sampleType.identifier): \(error.localizedDescription)")
             return 0
         }
-    }
 
-    // MARK: - Sleep
-
-    /// Query sleep analysis via anchored query, group into sessions via SleepMapper,
-    /// POST as NDJSON. Each NDJSON line is one SleepRecord (a complete session with stages).
-    private func syncSleep() async -> Int {
-        let sleepType = HKCategoryType(.sleepAnalysis)
-        let currentAnchor = syncStateRepository.anchor(for: sleepType)
-        var pendingAnchors: [(HKSampleType, HKQueryAnchor)] = []
+        let mapped = transform(result.samples)
+        guard !mapped.isEmpty else {
+            // Still persist the anchor even with no records — the query succeeded
+            // and advancing the anchor avoids re-scanning the same empty range.
+            if let newAnchor = result.newAnchor {
+                syncStateRepository.saveAnchor(newAnchor, for: sampleType)
+            }
+            return 0
+        }
 
         do {
-            let result = try await queryService.fetchNewSamples(
-                for: sleepType,
-                anchor: currentAnchor
-            )
-            let mapped = SleepMapper.mapSleepSamples(result.samples)
+            let response = try await apiService.postRecords(mapped, recordType: recordType)
+            Log.sync.info("\(sampleType.identifier): uploaded \(mapped.count) records — \(response.status)")
 
             if let newAnchor = result.newAnchor {
-                pendingAnchors.append((sleepType, newAnchor))
+                syncStateRepository.saveAnchor(newAnchor, for: sampleType)
             }
-            Log.sync.info("Fetched \(mapped.count) sleep sessions from \(result.samples.count) stage samples")
-
-            return await postAndPersistAnchors(mapped, recordType: "sleep", pendingAnchors: pendingAnchors)
+            return mapped.count
         } catch {
-            Log.sync.error("Sleep query failed: \(error.localizedDescription)")
+            Log.sync.error("\(sampleType.identifier): upload failed (\(mapped.count) records) — \(error.localizedDescription)")
+            // Anchor NOT persisted — next sync re-fetches these records.
             return 0
         }
     }
@@ -165,7 +126,6 @@ final class SyncCoordinator: ObservableObject {
     /// summaries don't support anchored queries — we track the last sync date instead.
     private func syncActivitySummaries() async -> Int {
         let syncKey = "activity_summaries"
-        // On first sync, look back 7 days. On subsequent syncs, start from last sync date.
         let startDate = syncStateRepository.lastSyncDate(for: syncKey)
             ?? Calendar.current.date(byAdding: .day, value: -7, to: Date())!
         let endDate = Date()
@@ -173,42 +133,16 @@ final class SyncCoordinator: ObservableObject {
         do {
             let summaries = try await queryService.fetchActivitySummaries(from: startDate, to: endDate)
             let mapped = ActivitySummaryMapper.mapSummaries(summaries)
-            Log.sync.info("Fetched \(mapped.count) activity summaries")
 
             guard !mapped.isEmpty else { return 0 }
 
             let response = try await apiService.postRecords(mapped, recordType: "activity_summaries")
-            Log.sync.info("Activity summaries upload succeeded (\(mapped.count)): \(response.status)")
+            Log.sync.info("Activity summaries: uploaded \(mapped.count) records — \(response.status)")
 
             syncStateRepository.saveLastSyncDate(endDate, for: syncKey)
             return mapped.count
         } catch {
             Log.sync.error("Activity summary sync failed: \(error.localizedDescription)")
-            return 0
-        }
-    }
-
-    // MARK: - Shared upload + anchor persistence
-
-    /// POST an array of records as NDJSON. On success, persist all pending anchors.
-    /// Returns the number of records uploaded (0 if empty or on failure).
-    private func postAndPersistAnchors<T: Encodable>(
-        _ records: [T],
-        recordType: String,
-        pendingAnchors: [(HKSampleType, HKQueryAnchor)]
-    ) async -> Int {
-        guard !records.isEmpty else { return 0 }
-
-        do {
-            let response = try await apiService.postRecords(records, recordType: recordType)
-            Log.sync.info("\(recordType) upload succeeded (\(records.count) records): \(response.status)")
-
-            for (type, anchor) in pendingAnchors {
-                syncStateRepository.saveAnchor(anchor, for: type)
-            }
-            return records.count
-        } catch {
-            Log.sync.error("\(recordType) upload failed (\(records.count) records): \(error.localizedDescription)")
             return 0
         }
     }
