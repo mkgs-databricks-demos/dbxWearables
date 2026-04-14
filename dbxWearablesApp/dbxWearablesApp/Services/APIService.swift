@@ -65,15 +65,22 @@ final class APIService {
 }
 
 enum APIError: Error, LocalizedError {
+    /// Server returned an error. Check `isRetryable` to decide whether to retry.
     case httpError(statusCode: Int)
-    case noSamplesToUpload
 
     var errorDescription: String? {
         switch self {
         case .httpError(let statusCode):
             return "HTTP request failed with status code \(statusCode)."
-        case .noSamplesToUpload:
-            return "No new samples to upload."
+        }
+    }
+
+    /// Whether this error is worth retrying (server-side or rate-limiting).
+    /// 4xx errors (except 429) indicate a client problem — retrying won't help.
+    var isRetryable: Bool {
+        switch self {
+        case .httpError(let statusCode):
+            return statusCode == 429 || (500...599).contains(statusCode)
         }
     }
 }

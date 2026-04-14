@@ -55,11 +55,10 @@ final class SyncCoordinator: ObservableObject {
             WorkoutMapper.mapWorkouts(samples)
         }
 
-        // Sleep — stage samples grouped into sessions
-        let sleepType = HKCategoryType(.sleepAnalysis)
-        totalRecords += await syncSampleType(sleepType, recordType: "sleep") { samples in
-            SleepMapper.mapSleepSamples(samples)
-        }
+        // Sleep — must query ALL stage samples at once so the mapper can group
+        // them into complete sessions. Batching would split sessions at arbitrary
+        // boundaries. Sleep volume is low (~3-5K stages/year) so this is safe.
+        totalRecords += await syncSleep()
 
         // Activity summaries — date-range query (no anchored query support)
         totalRecords += await syncActivitySummaries()
@@ -118,22 +117,24 @@ final class SyncCoordinator: ObservableObject {
                 break
             }
 
-            // POST this batch
-            do {
-                let response = try await apiService.postRecords(mapped, recordType: recordType)
-                Log.sync.info("\(sampleType.identifier): batch uploaded \(mapped.count) records — \(response.status)")
+            // POST this batch, with one retry for retryable errors (429, 5xx).
+            let posted = await postBatchWithRetry(
+                mapped,
+                recordType: recordType,
+                label: sampleType.identifier
+            )
 
-                // Persist anchor immediately — this batch is committed.
-                if let newAnchor = result.newAnchor {
-                    syncStateRepository.saveAnchor(newAnchor, for: sampleType)
-                    currentAnchor = newAnchor
-                }
-                totalUploaded += mapped.count
-            } catch {
-                Log.sync.error("\(sampleType.identifier): batch upload failed (\(mapped.count) records) — \(error.localizedDescription)")
-                // Stop looping — previously completed batches are safe.
+            guard posted else {
+                // Upload failed — stop looping. Previously completed batches are safe.
                 break
             }
+
+            // Persist anchor immediately — this batch is committed.
+            if let newAnchor = result.newAnchor {
+                syncStateRepository.saveAnchor(newAnchor, for: sampleType)
+                currentAnchor = newAnchor
+            }
+            totalUploaded += mapped.count
 
             // If we got fewer than the limit, there's no more data for this type.
             if result.samples.count < batchSize {
@@ -142,6 +143,81 @@ final class SyncCoordinator: ObservableObject {
         }
 
         return totalUploaded
+    }
+
+    // MARK: - Sleep (unbatched)
+
+    /// Sleep requires all stage samples in a single query so SleepMapper can group
+    /// contiguous stages into complete sessions. Batching would split a session's
+    /// stages across batches, producing two broken records instead of one.
+    ///
+    /// This is safe because sleep volume is low — a full year is ~3-5K stage samples
+    /// (~1 MB of NDJSON), well within memory and upload time budgets.
+    private func syncSleep() async -> Int {
+        let sleepType = HKCategoryType(.sleepAnalysis)
+        let currentAnchor = syncStateRepository.anchor(for: sleepType)
+
+        do {
+            let result = try await queryService.fetchNewSamples(
+                for: sleepType,
+                anchor: currentAnchor,
+                limit: HKObjectQueryNoLimit
+            )
+
+            let mapped = SleepMapper.mapSleepSamples(result.samples)
+
+            if mapped.isEmpty {
+                if let newAnchor = result.newAnchor {
+                    syncStateRepository.saveAnchor(newAnchor, for: sleepType)
+                }
+                return 0
+            }
+
+            let posted = await postBatchWithRetry(mapped, recordType: "sleep", label: "sleep")
+            guard posted else { return 0 }
+
+            if let newAnchor = result.newAnchor {
+                syncStateRepository.saveAnchor(newAnchor, for: sleepType)
+            }
+            return mapped.count
+        } catch {
+            Log.sync.error("Sleep query failed: \(error.localizedDescription)")
+            return 0
+        }
+    }
+
+    // MARK: - POST with retry
+
+    /// Attempt to POST a batch of records. On retryable errors (429, 5xx), wait
+    /// briefly and retry once. On non-retryable errors (4xx), fail immediately
+    /// to avoid wasting the background execution window.
+    ///
+    /// Returns `true` if the POST succeeded (first attempt or retry).
+    private func postBatchWithRetry<T: Encodable>(
+        _ records: [T],
+        recordType: String,
+        label: String
+    ) async -> Bool {
+        do {
+            let response = try await apiService.postRecords(records, recordType: recordType)
+            Log.sync.info("\(label): batch uploaded \(records.count) records — \(response.status)")
+            return true
+        } catch let error as APIError where error.isRetryable {
+            Log.sync.warning("\(label): retryable error (\(error.localizedDescription)), retrying in 2s...")
+            try? await Task.sleep(for: .seconds(2))
+
+            do {
+                let response = try await apiService.postRecords(records, recordType: recordType)
+                Log.sync.info("\(label): retry succeeded (\(records.count) records) — \(response.status)")
+                return true
+            } catch {
+                Log.sync.error("\(label): retry failed (\(records.count) records) — \(error.localizedDescription)")
+                return false
+            }
+        } catch {
+            Log.sync.error("\(label): non-retryable error (\(records.count) records) — \(error.localizedDescription)")
+            return false
+        }
     }
 
     // MARK: - Activity summaries (rings)
@@ -160,13 +236,13 @@ final class SyncCoordinator: ObservableObject {
 
             guard !mapped.isEmpty else { return 0 }
 
-            let response = try await apiService.postRecords(mapped, recordType: "activity_summaries")
-            Log.sync.info("Activity summaries: uploaded \(mapped.count) records — \(response.status)")
+            let posted = await postBatchWithRetry(mapped, recordType: "activity_summaries", label: "activity_summaries")
+            guard posted else { return 0 }
 
             syncStateRepository.saveLastSyncDate(endDate, for: syncKey)
             return mapped.count
         } catch {
-            Log.sync.error("Activity summary sync failed: \(error.localizedDescription)")
+            Log.sync.error("Activity summary query failed: \(error.localizedDescription)")
             return 0
         }
     }
