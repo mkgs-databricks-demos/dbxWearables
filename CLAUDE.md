@@ -14,7 +14,7 @@ The project is in early development. What exists so far:
 - `README.md` — project description
 - `LICENSE` — MIT license
 - `CLAUDE.md` — this file
-- `dbxWearablesApp/` — iOS app for Apple HealthKit integration (Swift/SwiftUI, MVVM architecture) with:
+- `healthKit/` — iOS app for Apple HealthKit integration (Swift/SwiftUI, MVVM architecture) with:
   - Databricks-branded UI with tab-based navigation (Dashboard, Data Explorer, Payloads, About)
   - Theme system using Databricks brand colors (#FF3621 red, #1B3139 dark teal)
   - First-launch onboarding explaining ZeroBus and HealthKit data flow
@@ -24,7 +24,7 @@ The project is in early development. What exists so far:
   - Full HealthKit sync pipeline (incremental anchored queries, NDJSON serialization, batched POSTs)
   - Unit tests for models, services, and mappers
 
-Not yet created: Databricks-side source code (`src/`), pipeline definitions, notebooks, `databricks.yml`, `requirements.txt`, or CI/CD configuration. The Xcode project file (`.xcodeproj`) has not been generated yet — the Swift source files are in place and ready to be added to an Xcode project.
+Not yet created: Databricks-side source code (`src/`), pipeline definitions, notebooks, `databricks.yml`, `requirements.txt`, or CI/CD configuration. The Xcode project file (`.xcodeproj`) has not been generated yet — see `healthKit/XCODE_SETUP.md` for step-by-step instructions to create it and configure the build.
 
 ## Architecture
 
@@ -94,9 +94,10 @@ dbxWearables/
 ├── README.md                              # Project description
 ├── LICENSE                                # MIT license
 │
-├── dbxWearablesApp/                       # iOS app — Apple HealthKit integration
+├── healthKit/                             # iOS app — Apple HealthKit integration
 │   ├── .gitignore                         # Xcode/Swift-specific ignores
-│   ├── dbxWearablesApp/                   # Main app source
+│   ├── XCODE_SETUP.md                    # Step-by-step Xcode project creation guide
+│   ├── healthKit/                         # Main app source
 │   │   ├── App/                           # App entry point (dbxWearablesApp.swift), AppDelegate
 │   │   ├── Configuration/                 # API endpoint and HealthKit type configs
 │   │   ├── Models/                        # Codable structs (HealthSample, WorkoutRecord, SyncRecord, SyncStats, etc.)
@@ -116,8 +117,8 @@ dbxWearables/
 │   │   ├── Utilities/                     # Date formatters, HK extensions, Keychain, Logger
 │   │   ├── Resources/                     # Asset catalog (AccentColor = #FF3621)
 │   │   └── Entitlements/                  # HealthKit entitlements plist
-│   ├── dbxWearablesAppTests/              # Unit tests (models, services, mocks)
-│   └── dbxWearablesAppUITests/            # UI tests
+│   ├── healthKitTests/                    # Unit tests (models, services, mocks)
+│   └── healthKitUITests/                  # UI tests
 │
 └── (future directories below)
 ```
