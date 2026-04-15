@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSHealthShareUsageDescription</key>
+    <string>dbxWearables reads your activity, heart rate, sleep, and workout data to sync with your Databricks health dashboard.</string>
+
+    <key>NSHealthUpdateUsageDescription</key>
+    <string>dbxWearables does not write health data.</string>
+
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>processing</string>
+    </array>
+</dict>
+</plist>
