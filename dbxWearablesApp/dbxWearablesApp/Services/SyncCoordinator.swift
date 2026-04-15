@@ -4,10 +4,9 @@ import OSLog
 
 /// Orchestrates the sync cycle: query HealthKit → map to models → serialize NDJSON → POST → update anchor.
 ///
-/// Each sample type is synced independently with its own query → POST → anchor-persist cycle.
-/// This means each type makes independent progress within a background execution window (~30s).
-/// If time runs out after syncing 6 of 14 types, those 6 are done — the next wake picks up
-/// the remaining 8 from their last anchors.
+/// All sample types are synced concurrently via TaskGroup. Each type runs its own
+/// independent query → POST → anchor-persist loop, so they make progress in parallel.
+/// URLSession's per-host connection limit (~6) naturally throttles in-flight POSTs.
 final class SyncCoordinator: ObservableObject {
 
     private let queryService: HealthKitQueryService
@@ -28,8 +27,11 @@ final class SyncCoordinator: ObservableObject {
         self.syncStateRepository = syncStateRepository
     }
 
-    /// Run a full sync cycle for all configured HealthKit types.
-    /// Each type is queried, posted, and its anchor persisted independently.
+    /// Run a full sync cycle for all configured HealthKit types concurrently.
+    ///
+    /// Each type's batch loop (query → POST → advance anchor) runs in its own task.
+    /// All types execute in parallel, with URLSession's connection pool managing
+    /// the number of simultaneous network requests (~6 per host).
     ///
     /// - Parameter context: `.foreground` when the user triggers sync from the UI (no time
     ///   limit, larger batches); `.background` when triggered by an observer query (~30s
@@ -39,34 +41,51 @@ final class SyncCoordinator: ObservableObject {
         defer { Task { @MainActor in isSyncing = false } }
 
         let batchSize = HealthKitConfiguration.queryBatchSize(for: context)
-        var totalRecords = 0
 
-        // Quantity types — one POST per type (stepCount, heartRate, etc.)
-        for quantityType in HealthKitConfiguration.quantityTypes {
-            totalRecords += await syncSampleType(quantityType, batchSize: batchSize, recordType: "samples") { samples in
-                HealthSampleMapper.mapQuantitySamples(samples)
+        let totalRecords = await withTaskGroup(of: Int.self, returning: Int.self) { group in
+
+            // Quantity types — each runs its own batched sync loop concurrently.
+            for quantityType in HealthKitConfiguration.quantityTypes {
+                group.addTask {
+                    await self.syncSampleType(quantityType, batchSize: batchSize, recordType: "samples") { samples in
+                        HealthSampleMapper.mapQuantitySamples(samples)
+                    }
+                }
             }
+
+            // Stand hour — category type, mapped as a HealthSample.
+            group.addTask {
+                let standHourType = HKCategoryType(.appleStandHour)
+                return await self.syncSampleType(standHourType, batchSize: batchSize, recordType: "samples") { samples in
+                    HealthSampleMapper.mapCategorySamples(samples)
+                }
+            }
+
+            // Workouts
+            group.addTask {
+                let workoutType = HKSeriesType.workoutType()
+                return await self.syncSampleType(workoutType, batchSize: batchSize, recordType: "workouts") { samples in
+                    WorkoutMapper.mapWorkouts(samples)
+                }
+            }
+
+            // Sleep — unbatched, but still runs concurrently with the other types.
+            group.addTask {
+                await self.syncSleep()
+            }
+
+            // Activity summaries — date-range query, runs concurrently.
+            group.addTask {
+                await self.syncActivitySummaries()
+            }
+
+            // Aggregate record counts as each type completes.
+            var total = 0
+            for await count in group {
+                total += count
+            }
+            return total
         }
-
-        // Stand hour — category type, mapped as a HealthSample
-        let standHourType = HKCategoryType(.appleStandHour)
-        totalRecords += await syncSampleType(standHourType, batchSize: batchSize, recordType: "samples") { samples in
-            HealthSampleMapper.mapCategorySamples(samples)
-        }
-
-        // Workouts
-        let workoutType = HKSeriesType.workoutType()
-        totalRecords += await syncSampleType(workoutType, batchSize: batchSize, recordType: "workouts") { samples in
-            WorkoutMapper.mapWorkouts(samples)
-        }
-
-        // Sleep — must query ALL stage samples at once so the mapper can group
-        // them into complete sessions. Batching would split sessions at arbitrary
-        // boundaries. Sleep volume is low (~3-5K stages/year) so this is safe.
-        totalRecords += await syncSleep()
-
-        // Activity summaries — date-range query (no anchored query support)
-        totalRecords += await syncActivitySummaries()
 
         await MainActor.run {
             lastSyncDate = Date()
@@ -93,7 +112,7 @@ final class SyncCoordinator: ObservableObject {
         _ sampleType: HKSampleType,
         batchSize: Int,
         recordType: String,
-        transform: ([HKSample]) -> [T]
+        transform: @Sendable ([HKSample]) -> [T]
     ) async -> Int {
         var currentAnchor = syncStateRepository.anchor(for: sampleType)
         var totalUploaded = 0
