@@ -14,6 +14,23 @@ final class APIService {
         self.session = session
     }
 
+    /// Build the metadata headers sent with every POST request.
+    /// Exposed so callers (e.g., SyncCoordinator) can capture headers for the SyncLedger.
+    func buildRequestHeaders(for recordType: String) -> [String: String] {
+        var headers: [String: String] = [
+            "Content-Type": "application/x-ndjson",
+            "X-Device-Id": DeviceIdentifier.current,
+            "X-Platform": "apple_healthkit",
+            "X-App-Version": appVersion,
+            "X-Upload-Timestamp": DateFormatters.iso8601WithTimezone.string(from: Date()),
+            "X-Record-Type": recordType,
+        ]
+        if let token = KeychainHelper.retrieveAPIToken() {
+            headers["Authorization"] = "Bearer \(token)"
+        }
+        return headers
+    }
+
     /// Post an array of Encodable records as NDJSON to the Databricks ingestion endpoint.
     ///
     /// Wire format:
@@ -27,25 +44,15 @@ final class APIService {
     func postRecords<T: Encodable>(_ records: [T], recordType: String) async throws -> APIResponse {
         let url = APIConfiguration.baseURL.appendingPathComponent(APIConfiguration.ingestPath)
         let body = try NDJSONSerializer.encode(records)
+        let headers = buildRequestHeaders(for: recordType)
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.httpBody = body
         request.timeoutInterval = APIConfiguration.timeoutInterval
 
-        // Content type: NDJSON (RFC-adjacent; widely supported by streaming ingest APIs)
-        request.setValue("application/x-ndjson", forHTTPHeaderField: "Content-Type")
-
-        // Device and upload metadata — the Databricks App reads these headers and
-        // attaches them as columns alongside each NDJSON record in the bronze table.
-        request.setValue(DeviceIdentifier.current, forHTTPHeaderField: "X-Device-Id")
-        request.setValue("apple_healthkit", forHTTPHeaderField: "X-Platform")
-        request.setValue(appVersion, forHTTPHeaderField: "X-App-Version")
-        request.setValue(DateFormatters.iso8601WithTimezone.string(from: Date()), forHTTPHeaderField: "X-Upload-Timestamp")
-        request.setValue(recordType, forHTTPHeaderField: "X-Record-Type")
-
-        if let token = KeychainHelper.retrieveAPIToken() {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        for (key, value) in headers {
+            request.setValue(value, forHTTPHeaderField: key)
         }
 
         let (data, response) = try await session.data(for: request)

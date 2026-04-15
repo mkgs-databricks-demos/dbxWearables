@@ -12,6 +12,7 @@ final class SyncCoordinator: ObservableObject {
     private let queryService: HealthKitQueryService
     private let apiService: APIService
     private let syncStateRepository: SyncStateRepository
+    let syncLedger: SyncLedger
 
     @Published var lastSyncDate: Date?
     @Published var isSyncing = false
@@ -20,11 +21,13 @@ final class SyncCoordinator: ObservableObject {
     init(
         healthStore: HKHealthStore,
         apiService: APIService = APIService(),
-        syncStateRepository: SyncStateRepository = SyncStateRepository()
+        syncStateRepository: SyncStateRepository = SyncStateRepository(),
+        syncLedger: SyncLedger = SyncLedger()
     ) {
         self.queryService = HealthKitQueryService(healthStore: healthStore)
         self.apiService = apiService
         self.syncStateRepository = syncStateRepository
+        self.syncLedger = syncLedger
     }
 
     /// Run a full sync cycle for all configured HealthKit types concurrently.
@@ -243,14 +246,33 @@ final class SyncCoordinator: ObservableObject {
     /// to avoid wasting the background execution window.
     ///
     /// Returns `true` if the POST succeeded (first attempt or retry).
+    /// On success, records the payload and metadata in SyncLedger for demo inspection.
     private func postBatchWithRetry<T: Encodable>(
         _ records: [T],
         recordType: String,
         label: String
     ) async -> Bool {
+        // Capture the NDJSON string before posting so we can store it in the ledger.
+        let ndjsonString: String
+        do {
+            ndjsonString = try NDJSONSerializer.encodeToString(records)
+        } catch {
+            Log.sync.error("\(label): NDJSON serialization failed — \(error.localizedDescription)")
+            return false
+        }
+
+        let headers = apiService.buildRequestHeaders(for: recordType)
+
         do {
             let response = try await apiService.postRecords(records, recordType: recordType)
             Log.sync.info("\(label): batch uploaded \(records.count) records — \(response.status)")
+            await syncLedger.recordSync(
+                recordType: recordType,
+                recordCount: records.count,
+                httpStatusCode: 200,
+                ndjsonPayload: ndjsonString,
+                requestHeaders: headers
+            )
             return true
         } catch let error as APIError where error.isRetryable {
             Log.sync.warning("\(label): retryable error (\(error.localizedDescription)), retrying in 2s...")
@@ -259,6 +281,13 @@ final class SyncCoordinator: ObservableObject {
             do {
                 let response = try await apiService.postRecords(records, recordType: recordType)
                 Log.sync.info("\(label): retry succeeded (\(records.count) records) — \(response.status)")
+                await syncLedger.recordSync(
+                    recordType: recordType,
+                    recordCount: records.count,
+                    httpStatusCode: 200,
+                    ndjsonPayload: ndjsonString,
+                    requestHeaders: headers
+                )
                 return true
             } catch {
                 Log.sync.error("\(label): retry failed (\(records.count) records) — \(error.localizedDescription)")
