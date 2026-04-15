@@ -14,7 +14,15 @@ The project is in early development. What exists so far:
 - `README.md` — project description
 - `LICENSE` — MIT license
 - `CLAUDE.md` — this file
-- `dbxWearablesApp/` — iOS app scaffolding for Apple HealthKit integration (Swift/SwiftUI, MVVM architecture, with models, services, and test stubs)
+- `dbxWearablesApp/` — iOS app for Apple HealthKit integration (Swift/SwiftUI, MVVM architecture) with:
+  - Databricks-branded UI with tab-based navigation (Dashboard, Data Explorer, Payloads, About)
+  - Theme system using Databricks brand colors (#FF3621 red, #1B3139 dark teal)
+  - First-launch onboarding explaining ZeroBus and HealthKit data flow
+  - Payload Inspector for viewing the last-sent NDJSON per record type (demo verification)
+  - Data Explorer with per-category breakdowns and aggregation counts
+  - SyncLedger service for persisting sent payloads and cumulative stats
+  - Full HealthKit sync pipeline (incremental anchored queries, NDJSON serialization, batched POSTs)
+  - Unit tests for models, services, and mappers
 
 Not yet created: Databricks-side source code (`src/`), pipeline definitions, notebooks, `databricks.yml`, `requirements.txt`, or CI/CD configuration. The Xcode project file (`.xcodeproj`) has not been generated yet — the Swift source files are in place and ready to be added to an Xcode project.
 
@@ -89,15 +97,24 @@ dbxWearables/
 ├── dbxWearablesApp/                       # iOS app — Apple HealthKit integration
 │   ├── .gitignore                         # Xcode/Swift-specific ignores
 │   ├── dbxWearablesApp/                   # Main app source
-│   │   ├── App/                           # App entry point, AppDelegate, Info.plist
+│   │   ├── App/                           # App entry point (dbxWearablesApp.swift), AppDelegate
 │   │   ├── Configuration/                 # API endpoint and HealthKit type configs
-│   │   ├── Models/                        # Codable structs (HealthSample, WorkoutRecord, etc.)
-│   │   ├── Services/                      # HealthKitManager, QueryService, APIService, SyncCoordinator
-│   │   ├── Repositories/                  # Sync state persistence, pending upload queue
-│   │   ├── Views/                         # SwiftUI views (dashboard, permissions, settings)
-│   │   ├── ViewModels/                    # MVVM view models
+│   │   ├── Models/                        # Codable structs (HealthSample, WorkoutRecord, SyncRecord, SyncStats, etc.)
+│   │   ├── Services/                      # HealthKitManager, QueryService, APIService, SyncCoordinator, SyncLedger
+│   │   ├── Repositories/                  # Sync state persistence (anchors, dates)
+│   │   ├── Theme/                         # DBXTheme (colors, gradients, typography), DBXButtonStyles
+│   │   ├── Views/                         # SwiftUI views
+│   │   │   ├── MainTabView.swift          # Root TabView (Dashboard, Data, Payloads, About)
+│   │   │   ├── PermissionsView.swift      # HealthKit authorization (used in onboarding)
+│   │   │   ├── Dashboard/                 # DashboardView, SyncStatusCard, CategoryStatCard
+│   │   │   ├── DataExplorer/              # DataExplorerView, CategoryDetailView
+│   │   │   ├── Payloads/                  # PayloadInspectorView, NDJSONLineView
+│   │   │   ├── About/                     # AboutView, DataFlowDiagramView
+│   │   │   ├── Onboarding/               # OnboardingView (first-launch swipeable flow)
+│   │   │   └── Components/               # DBXHeaderView (reusable branded header)
+│   │   ├── ViewModels/                    # DashboardViewModel, DataExplorerViewModel, PayloadInspectorViewModel, PermissionsViewModel
 │   │   ├── Utilities/                     # Date formatters, HK extensions, Keychain, Logger
-│   │   ├── Resources/                     # Asset catalog, localization
+│   │   ├── Resources/                     # Asset catalog (AccentColor = #FF3621)
 │   │   └── Entitlements/                  # HealthKit entitlements plist
 │   ├── dbxWearablesAppTests/              # Unit tests (models, services, mocks)
 │   └── dbxWearablesAppUITests/            # UI tests
@@ -125,6 +142,48 @@ dbxWearables/
 ├── databricks.yml          # Databricks Asset Bundle configuration
 └── requirements.txt        # Python dependencies
 ```
+
+## iOS App UI Architecture
+
+The iOS app is a **demo tool** for showcasing Databricks ZeroBus ingestion. It uses Databricks branding and is designed for live presentations.
+
+### Navigation
+
+Tab-based navigation with 4 tabs, plus a first-launch onboarding sheet:
+
+| Tab | View | Purpose |
+|-----|------|---------|
+| Dashboard | `DashboardView` | Hero header, Sync Now button, per-category record count grid, recent activity feed |
+| Data | `DataExplorerView` | Per-category list with drill-down to type breakdowns (samples by HK type, workouts by activity, etc.) |
+| Payloads | `PayloadInspectorView` | Terminal-aesthetic NDJSON viewer showing last-sent payload per record type, metadata headers, copy-to-clipboard |
+| About | `AboutView` | ZeroBus explanation, visual data flow diagram, HealthKit types list, permissions, settings, replay onboarding |
+
+The **onboarding flow** (`OnboardingView`) is a 4-page swipeable sheet shown on first launch (tracked via `@AppStorage`). It explains ZeroBus, lists HealthKit data types sent, and requests HealthKit permissions. It can be re-triggered from the About tab.
+
+### Theme System
+
+All Databricks branding is centralized in `Theme/`:
+
+- **`DBXTheme.swift`** — `DBXColors` (brand colors: `dbxRed` #FF3621, `dbxDarkTeal` #1B3139, `dbxNavy` #0D2228, `dbxOrange` #FF6A33, `dbxGreen` #00A972, light/dark adaptive grays), `DBXGradients` (primary red-to-orange, dark background), `DBXTypography` (heroTitle, sectionHeader, stat, mono), view modifiers (`.dbxCard()`, `.dbxGlassCard()`), and `DatabricksWordmark` (stylized "databricks" text placeholder — no external image assets)
+- **`DBXButtonStyles.swift`** — `DBXPrimaryButtonStyle` (gradient + scale animation), `DBXSecondaryButtonStyle` (outlined)
+- **`AccentColor`** asset set to #FF3621
+
+### SyncLedger (Payload & Stats Persistence)
+
+`SyncLedger` is a Swift `actor` that persists sent payloads and aggregation stats as JSON files in the app's Documents directory (`sync_ledger/`). It stores:
+
+- **Last NDJSON payload** per record type (5 files: `last_payload_{type}.json`) — for the Payload Inspector
+- **Cumulative stats** (`stats.json`) — total counts, breakdowns by HK type / activity type / sample type
+- **Recent sync events** (`recent_events.json`) — last 20 events without payloads, for the Dashboard activity feed
+
+`SyncCoordinator.postBatchWithRetry()` calls `syncLedger.recordSync(...)` after each successful POST, passing the NDJSON string (via `NDJSONSerializer.encodeToString()`) and request headers (via `APIService.buildRequestHeaders()`).
+
+### MVVM Pattern
+
+- **Views** observe `@StateObject` ViewModels and never call Services directly
+- **ViewModels** are `@MainActor`, access Services through `AppDelegate` (via `UIApplication.shared.delegate`)
+- **AppDelegate** owns `HealthKitManager` and `SyncCoordinator` (which owns `SyncLedger`)
+- `dbxWearablesApp.swift` (`@main`) renders `MainTabView` and manages the onboarding sheet
 
 ## Development Workflow
 
