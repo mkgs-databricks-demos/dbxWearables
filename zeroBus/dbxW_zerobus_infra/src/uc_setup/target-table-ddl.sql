@@ -26,11 +26,11 @@ SELECT current_catalog(), current_schema();
 -- DBTITLE 1,Set Query Tags for Observability
 -- Tag all subsequent statements in this session for cost tracking and auditing.
 -- These tags appear in query history, system tables, and usage dashboards.
-SET QUERY_TAGS['project'] = 'dbxWearables ZeroBus',
-    QUERY_TAGS['component'] = 'uc_setup',
-    QUERY_TAGS['pipeline'] = 'dbxw_zerobus_infra',
-    QUERY_TAGS['catalog'] = catalog_use,
-    QUERY_TAGS['schema'] = schema_use;
+SET QUERY_TAGS['project'] = 'dbxWearables ZeroBus';
+SET QUERY_TAGS['component'] = 'uc_setup';
+SET QUERY_TAGS['pipeline'] = 'dbxw_zerobus_infra';
+SET QUERY_TAGS['catalog'] = catalog_use;
+SET QUERY_TAGS['schema'] = schema_use;
 
 -- COMMAND ----------
 

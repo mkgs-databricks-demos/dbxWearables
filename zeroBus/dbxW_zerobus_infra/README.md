@@ -77,16 +77,44 @@ For more information, see the [Predictive Optimization documentation](https://do
 
 ## Deployment Order
 
-Infrastructure resources must be deployed **first**, before any dependent bundle:
+Infrastructure resources must be deployed **first**, before any dependent bundle. The shared [`deploy.sh`](../deploy.sh) script enforces this order and runs **readiness checks** before allowing the app bundle to deploy.
+
+### Pipeline stages
 
 ```
 1. databricks bundle deploy --target dev       ← creates schema, scope, warehouse
 2. databricks bundle run wearables_uc_setup    ← creates SPN, stores client_id + derived secrets, table, grants
-3. Admin: provision client_secret               ← generate OAuth secret, store in scope
-4. dbxW_zerobus app bundle deploy              ← coming soon (AppKit app, pipelines)
+3. ── Readiness gate ──────────────────────────
+   │  ✓ Secret scope: client_id                (auto-provisioned)
+   │  ✓ Secret scope: workspace_url            (auto-provisioned)
+   │  ✓ Secret scope: zerobus_endpoint         (auto-provisioned)
+   │  ✓ Secret scope: target_table_name        (auto-provisioned)
+   │  ✓ Secret scope: client_secret            (admin-provisioned)
+   │  ✓ Table: catalog.schema.wearables_zerobus
+   └───────────────────────────────────────────
+4. Admin: provision client_secret              ← generate OAuth secret, store in scope
+5. dbxW_zerobus app bundle deploy             ← gated on all checks passing
 ```
 
-Use the shared [`deploy.sh`](../deploy.sh) script in the parent `zeroBus/` directory to deploy bundles in the correct order.
+### What the readiness gate checks
+
+| Check | Missing → behaviour |
+| --- | --- |
+| Auto-provisioned keys (`client_id`, `workspace_url`, `zerobus_endpoint`, `target_table_name`) | **Fail** — instructs you to run the UC setup job |
+| Bronze table (`wearables_zerobus`) | **Fail** — instructs you to run the UC setup job |
+| Admin-provisioned key (`client_secret`) | **Fail** — prints admin provisioning instructions; use `--skip-checks` to override |
+
+### deploy.sh flags
+
+| Flag | Effect |
+| --- | --- |
+| `--target <name>` | Required. Bundle target (`dev`, `hls_fde`, `prod`). |
+| `--infra` | Deploy only the infrastructure bundle. |
+| `--app` | Deploy only the application bundle (with readiness checks). |
+| `--run-setup` | Run the UC setup job after deploying the infra bundle. |
+| `--skip-checks` | Bypass infrastructure readiness checks before app deploy. |
+| `--validate` | Validate bundles without deploying. |
+| `--destroy` | Destroy deployed resources for the target. |
 
 ## Targets
 
@@ -98,27 +126,38 @@ Use the shared [`deploy.sh`](../deploy.sh) script in the parent `zeroBus/` direc
 
 ## Quick Start
 
-### Deploy via shared script (recommended)
+### First deployment (recommended)
 
 ```bash
 cd zeroBus
-./deploy.sh --target dev            # deploys infra first, then app (when available)
-./deploy.sh --target dev --infra    # deploy only this infra bundle
+
+# Deploy infra + run UC setup job in one step
+./deploy.sh --target dev --run-setup
+
+# The script will report that client_secret is MISSING — expected on first run.
+# Provision it (see "Provision the client_secret" below), then:
+./deploy.sh --target dev --app
 ```
 
-### Deploy standalone
+### Deploy via shared script
+
+```bash
+cd zeroBus
+./deploy.sh --target dev                          # deploy all bundles (with readiness checks)
+./deploy.sh --target dev --run-setup              # deploy infra + run UC setup + deploy app
+./deploy.sh --target dev --infra                  # deploy only this infra bundle
+./deploy.sh --target dev --app                    # deploy only the app bundle (with checks)
+./deploy.sh --target dev --app --skip-checks      # deploy app without readiness checks
+./deploy.sh --target dev --validate               # validate only, no deploy
+./deploy.sh --target dev --destroy                # destroy deployed resources
+```
+
+### Deploy standalone (without deploy.sh)
 
 ```bash
 cd zeroBus/dbxW_zerobus_infra
 databricks bundle validate --target dev
 databricks bundle deploy --target dev
-```
-
-### Run the UC setup job (required after first deploy)
-
-```bash
-# Creates the ZeroBus SPN, stores client_id + derived values in the secret
-# scope, creates the bronze table, and grants permissions.
 databricks bundle run wearables_uc_setup --target dev
 ```
 
