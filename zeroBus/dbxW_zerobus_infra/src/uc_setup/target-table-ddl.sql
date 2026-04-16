@@ -20,6 +20,17 @@ SELECT current_catalog(), current_schema();
 
 -- COMMAND ----------
 
+-- DBTITLE 1,Set Query Tags for Observability
+-- Tag all subsequent statements in this session for cost tracking and auditing.
+-- These tags appear in query history, system tables, and usage dashboards.
+SET QUERY_TAGS['project'] = 'dbxWearables ZeroBus',
+    QUERY_TAGS['component'] = 'uc_setup',
+    QUERY_TAGS['pipeline'] = 'dbxw_zerobus_infra',
+    QUERY_TAGS['catalog'] = catalog_use,
+    QUERY_TAGS['schema'] = schema_use;
+
+-- COMMAND ----------
+
 -- DBTITLE 1,Target Table DDL — wearables_zerobus
 CREATE TABLE IF NOT EXISTS wearables_zerobus
 (
@@ -50,8 +61,8 @@ TBLPROPERTIES (
 -- to trigger OPTIMIZE asynchronously after ZeroBus writes.
 --
 -- If the DESCRIBE output below shows predictive optimization is NOT enabled
--- for this schema, see:
---   fixtures/examples/queries/enable_predictive_optimization.sql
+-- for this schema, open the SQL editor query:
+--   "dbxWearables ZeroBus — Enable Predictive Optimization"
 
 DESCRIBE SCHEMA EXTENDED IDENTIFIER(catalog_use || '.' || schema_use);
 

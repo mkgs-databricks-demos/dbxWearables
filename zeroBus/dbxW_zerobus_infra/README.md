@@ -33,9 +33,11 @@ The `wearables_zerobus` bronze table uses **liquid clustering** (`CLUSTER BY AUT
 
 Predictive optimization uses an inheritance model: **account → catalog → schema**. If the catalog already has it enabled, the schema inherits automatically and no action is needed. If not, it must be enabled at the schema level before liquid clustering provides any benefit.
 
-The DDL notebook (`src/uc_setup/target-table-ddl`) includes a `DESCRIBE SCHEMA EXTENDED` cell to verify the current status. If predictive optimization is not active, see the example query:
+The DDL notebook (`src/uc_setup/target-table-ddl`) includes a `DESCRIBE SCHEMA EXTENDED` cell to verify the current status. If predictive optimization is not active, use the SQL editor query:
 
-> [`fixtures/examples/queries/enable_predictive_optimization.sql`](fixtures/examples/queries/enable_predictive_optimization.sql)
+> **[dbxWearables ZeroBus — Enable Predictive Optimization](#query-afefd2e3-6a00-462c-965c-22452e1747f7)** — SQL editor query with widgets for catalog, schema, and environment. Includes parameterized `DESCRIBE SCHEMA EXTENDED` check and an `ALTER SCHEMA ... ENABLE PREDICTIVE OPTIMIZATION` statement (Step 2) and verification (Step 3).
+
+> *Note: The file `fixtures/examples/queries/enable_predictive_optimization.sql` is superseded by the SQL editor query above and can be safely deleted.*
 
 For more information, see the [Predictive Optimization documentation](https://docs.databricks.com/en/optimizations/predictive-optimization/).
 
