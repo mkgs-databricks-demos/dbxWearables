@@ -27,7 +27,7 @@ resources:
       tasks:
         - task_key: create_wearables_table
           notebook_task:
-            notebook_path: ../src/uc_setup/target-table-ddl.ipynb
+            notebook_path: ../src/uc_setup/target-table-ddl.sql
             source: WORKSPACE
             warehouse_id: ${resources.sql_warehouses.infra_warehouse.id}
 
