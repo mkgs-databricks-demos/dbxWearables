@@ -29,8 +29,8 @@ SELECT current_catalog(), current_schema();
 SET QUERY_TAGS['project'] = 'dbxWearables ZeroBus';
 SET QUERY_TAGS['component'] = 'uc_setup';
 SET QUERY_TAGS['pipeline'] = 'dbxw_zerobus_infra';
-EXECUTE IMMEDIATE "SET QUERY_TAGS['catalog'] = " || catalog_use || ";";
-EXECUTE IMMEDIATE "SET QUERY_TAGS['schema'] =" || schema_use || ";";
+EXECUTE IMMEDIATE "SET QUERY_TAGS['catalog'] = '" || catalog_use || "';";
+EXECUTE IMMEDIATE "SET QUERY_TAGS['schema'] = '" || schema_use || "';";
 
 -- COMMAND ----------
 
