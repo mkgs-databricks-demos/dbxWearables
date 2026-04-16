@@ -1,0 +1,22 @@
+<settings>
+    <setting
+        propertyKey="@Properties.apiBaseUrl"
+        title="@Strings.SettingApiUrl">
+        <settingConfig type="alphaNumeric"
+            prompt="@Strings.SettingApiUrlPrompt"/>
+    </setting>
+    <setting
+        propertyKey="@Properties.authToken"
+        title="@Strings.SettingAuthToken">
+        <settingConfig type="alphaNumeric"
+            prompt="@Strings.SettingAuthTokenPrompt"/>
+    </setting>
+    <setting
+        propertyKey="@Properties.syncIntervalMinutes"
+        title="@Strings.SettingSyncInterval">
+        <settingConfig type="numeric"
+            prompt="@Strings.SettingSyncIntervalPrompt"
+            min="5"
+            max="60"/>
+    </setting>
+</settings>

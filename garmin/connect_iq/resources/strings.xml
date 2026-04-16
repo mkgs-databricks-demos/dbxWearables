@@ -1,0 +1,14 @@
+<strings>
+    <string id="AppName">dbxWearables</string>
+    <string id="SettingApiUrl">API Base URL</string>
+    <string id="SettingApiUrlPrompt">Databricks AppKit endpoint (e.g. https://workspace.cloud.databricks.com/apps/health-ingest)</string>
+    <string id="SettingAuthToken">Auth Token</string>
+    <string id="SettingAuthTokenPrompt">Optional Bearer token for the ingestion endpoint</string>
+    <string id="SettingSyncInterval">Sync Interval (min)</string>
+    <string id="SettingSyncIntervalPrompt">Minutes between background syncs (minimum 5)</string>
+    <string id="StatusSyncing">Syncing...</string>
+    <string id="StatusLastSync">Last sync</string>
+    <string id="StatusNoSync">Not synced yet</string>
+    <string id="StatusError">Sync error</string>
+    <string id="StatusOk">Sync OK</string>
+</strings>

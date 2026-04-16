@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dbxwearables-garmin-pull"
+version = "0.1.0"
+description = "Pull Garmin health data from Garmin Connect and push to Databricks via ZeroBus"
+requires-python = ">=3.11"
+dependencies = [
+    "garminconnect>=0.2.0",
+    "databricks-sdk>=0.30.0",
+    "databricks-zerobus-ingest-sdk>=1.0.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+]
+
+[project.scripts]
+garmin-pull = "garmin.pull.runner:main"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

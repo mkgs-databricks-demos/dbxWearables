@@ -1,0 +1,10 @@
+project.manifest = manifest.xml
+
+# Source files
+base.sourcePath = source
+
+# Resources
+base.resourcePath = resources
+
+# Exclude list (add test files here if needed)
+base.excludeAnnotations = test

@@ -1,0 +1,5 @@
+<properties>
+    <property id="apiBaseUrl" type="string"></property>
+    <property id="authToken" type="string"></property>
+    <property id="syncIntervalMinutes" type="number">5</property>
+</properties>

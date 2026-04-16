@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<iq:manifest xmlns:iq="http://www.garmin.com/xml/connectiq" version="5">
+    <iq:application
+        id="a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        type="widget"
+        name="@Strings.AppName"
+        entry="DbxWearablesApp"
+        launcherIcon="@Drawables.LauncherIcon"
+        minApiLevel="4.2.0">
+
+        <iq:permissions>
+            <iq:uses-permission id="SensorHistory"/>
+            <iq:uses-permission id="Communications"/>
+            <iq:uses-permission id="Background"/>
+            <iq:uses-permission id="UserProfile"/>
+            <iq:uses-permission id="Sensor"/>
+            <iq:uses-permission id="Fit"/>
+        </iq:permissions>
+
+        <iq:languages>
+            <iq:language>eng</iq:language>
+        </iq:languages>
+
+        <iq:barrels/>
+
+        <iq:products>
+            <iq:product id="fr265"/>
+            <iq:product id="fr265s"/>
+            <iq:product id="fr965"/>
+            <iq:product id="venu3"/>
+            <iq:product id="venu3s"/>
+            <iq:product id="fenix8"/>
+            <iq:product id="enduro3"/>
+        </iq:products>
+
+    </iq:application>
+</iq:manifest>
