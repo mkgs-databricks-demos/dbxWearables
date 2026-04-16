@@ -20,7 +20,7 @@ This infrastructure bundle sits at the base of that stack. It creates the shared
 | Resource Type | Resource | Purpose |
 | --- | --- | --- |
 | Unity Catalog Schema | `wearables` schema with grants | Namespace isolation for medallion-layer tables |
-| Secret Scope | `dbxw_zerobus_credentials` | OAuth credentials, ZeroBus endpoint, workspace URL, target table name |
+| Secret Scope | `dbxw_zerobus_credentials` | ZeroBus endpoint, workspace URL, target table name, OAuth credentials |
 | SQL Warehouse | 2X-Small serverless PRO (preview channel) | Compute for DDL jobs and ad-hoc queries |
 | Service Principal | `dbxw-zerobus-{schema}` (created dynamically) | Least-privilege SPN for ZeroBus ingestion |
 | Bronze Table | `wearables_zerobus` (liquid clustering) | Target table for ZeroBus streaming writes |
@@ -34,24 +34,34 @@ The **dbxW ZeroBus — UC Setup** job (`resources/uc_setup.job.yml`) is a two-ta
 
 | Task | Notebook | What it does |
 | --- | --- | --- |
-| `ensure_service_principal` | `src/uc_setup/ensure-service-principal` (Python) | Creates or finds SPN `dbxw-zerobus-{schema}`, generates OAuth credentials, populates the secret scope, grants scope READ |
+| `ensure_service_principal` | `src/uc_setup/ensure-service-principal` (Python) | Creates or finds SPN `dbxw-zerobus-{schema}`, stores `client_id` + derived values in secret scope, grants scope READ, checks for `client_secret` |
 | `create_wearables_table` | `src/uc_setup/target-table-ddl` (SQL) | Creates the bronze table with liquid clustering, grants USE CATALOG / USE SCHEMA / MODIFY / SELECT to the SPN |
 
 The SPN's `application_id` is passed from task 1 to task 2 via a Databricks **task value**. The job is idempotent — safe to re-run at any time.
 
 ### Secret Scope Contents
 
-After running the UC setup job, the `dbxw_zerobus_credentials` scope contains:
+The `dbxw_zerobus_credentials` scope contains two categories of secrets:
+
+**Auto-provisioned** (by the UC setup job — refreshed on every run):
 
 | Key | Source | Description |
 | --- | --- | --- |
 | `client_id` | SPN `application_id` | OAuth M2M client identifier |
-| `client_secret` | Generated (one-time) | OAuth M2M client secret — cannot be retrieved after creation |
 | `workspace_url` | Derived from config | Databricks workspace URL |
 | `zerobus_endpoint` | Derived from workspace ID + region | ZeroBus Ingest server endpoint |
 | `target_table_name` | From job params | Fully qualified bronze table name |
 
-Non-sensitive keys (`workspace_url`, `zerobus_endpoint`, `target_table_name`) are refreshed on every run. To rotate OAuth credentials, delete the `client_id` and `client_secret` keys from the scope and re-run the job.
+**Admin-provisioned** (manual step required after first deploy):
+
+| Key | Source | Description |
+| --- | --- | --- |
+| `client_secret` | Admin-generated | OAuth M2M client secret |
+
+> **Admin action required:** After the first run of the UC setup job, an admin must generate an OAuth secret for the `dbxw-zerobus-{schema}` service principal and store the `client_secret` in the scope. The `client_id` is stored automatically. This can be done via:
+> * **Workspace UI:** Settings → Identity and access → Service principals → Secrets → Generate secret
+> * **Databricks CLI:** `databricks account service-principal-secrets create <sp_id>`
+> * **External keystore:** Sync from Azure Key Vault, AWS Secrets Manager, or HashiCorp Vault
 
 ## Predictive Optimization Requirement
 
@@ -71,8 +81,9 @@ Infrastructure resources must be deployed **first**, before any dependent bundle
 
 ```
 1. databricks bundle deploy --target dev       ← creates schema, scope, warehouse
-2. databricks bundle run wearables_uc_setup    ← creates SPN, credentials, table, grants
-3. dbxW_zerobus app bundle deploy              ← coming soon (AppKit app, pipelines)
+2. databricks bundle run wearables_uc_setup    ← creates SPN, stores client_id + derived secrets, table, grants
+3. Admin: provision client_secret               ← generate OAuth secret, store in scope
+4. dbxW_zerobus app bundle deploy              ← coming soon (AppKit app, pipelines)
 ```
 
 Use the shared [`deploy.sh`](../deploy.sh) script in the parent `zeroBus/` directory to deploy bundles in the correct order.
@@ -106,9 +117,20 @@ databricks bundle deploy --target dev
 ### Run the UC setup job (required after first deploy)
 
 ```bash
-# Creates the ZeroBus SPN, provisions OAuth credentials,
-# populates the secret scope, creates the bronze table, and grants permissions.
+# Creates the ZeroBus SPN, stores client_id + derived values in the secret
+# scope, creates the bronze table, and grants permissions.
 databricks bundle run wearables_uc_setup --target dev
+```
+
+### Provision the client_secret (admin step)
+
+```bash
+# 1. Generate an OAuth secret for the SPN (requires workspace or account admin)
+#    Via UI: Settings > Identity and access > Service principals > dbxw-zerobus-wearables > Secrets > Generate secret
+#    Via CLI: databricks account service-principal-secrets create <sp_workspace_id>
+
+# 2. Store the secret in the scope (client_id is already stored by the job)
+databricks secrets put-secret --scope dbxw_zerobus_credentials --key client_secret --string-value "<secret>"
 ```
 
 ### Managing Resources

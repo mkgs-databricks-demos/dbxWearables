@@ -2,9 +2,13 @@
 #
 # Two-task workflow:
 #   1. ensure_service_principal — creates (or finds) a least-privilege SPN
-#      dedicated to this schema, provisions OAuth credentials, populates the
-#      secret scope, and outputs the SPN's application_id as a task value.
+#      dedicated to this schema, populates the secret scope with client_id,
+#      workspace_url, zerobus_endpoint, and target_table_name, grants scope
+#      READ, and outputs the SPN's application_id as a task value.
 #   2. create_wearables_table — DDL + GRANT statements using the SPN from task 1.
+#
+# The client_secret must be provisioned separately by an admin via the
+# workspace UI, Databricks CLI, or external keystore.
 #
 # NOTE: catalog and schema references use ${resources.schemas.wearables_schema.*}
 #       per the bundle convention — never ${var.catalog} or ${var.schema} directly.
@@ -17,11 +21,13 @@ resources:
       description: >
         Bootstraps the ZeroBus ingestion infrastructure. Task 1 ensures a
         least-privilege service principal (dbxw-zerobus-{schema}) exists,
-        generates OAuth credentials, and populates the secret scope with
-        client_id, client_secret, workspace_url, zerobus_endpoint, and
-        target_table_name. Task 2 creates the wearables_zerobus bronze table
-        (liquid clustering via CLUSTER BY AUTO) and grants USE CATALOG /
-        USE SCHEMA / MODIFY / SELECT to the SPN. Idempotent — safe to re-run.
+        populates the secret scope with client_id, workspace_url,
+        zerobus_endpoint, and target_table_name, and grants the SPN READ
+        access to the scope. Task 2 creates the wearables_zerobus bronze
+        table (liquid clustering via CLUSTER BY AUTO) and grants USE CATALOG
+        / USE SCHEMA / MODIFY / SELECT to the SPN. The client_secret must
+        be provisioned by an admin after the first run. Idempotent — safe
+        to re-run.
 
       # Job-level parameters — available to all tasks via dbutils.widgets.get()
       parameters:
@@ -36,7 +42,7 @@ resources:
         # Task 1: Find or create the ZeroBus service principal
         - task_key: ensure_service_principal
           notebook_task:
-            notebook_path: ../src/uc_setup/ensure-service-principal.ipynb
+            notebook_path: ../src/uc_setup/ensure-service-principal.py
             source: WORKSPACE
 
         # Task 2: DDL + grants — receives SPN application_id from task 1

@@ -12,8 +12,11 @@
 -- COMMAND ----------
 
 -- DBTITLE 1,Set Catalog and Schema from Parameters
-DECLARE OR REPLACE VARIABLE catalog_use STRING DEFAULT :catalog_use;
-DECLARE OR REPLACE VARIABLE schema_use STRING DEFAULT :schema_use;
+DECLARE OR REPLACE VARIABLE catalog_use STRING;
+DECLARE OR REPLACE VARIABLE schema_use STRING;
+
+SET VARIABLE catalog_use = :catalog_use;
+SET VARIABLE schema_use = :schema_use;
 
 USE IDENTIFIER(catalog_use || '.' || schema_use);
 SELECT current_catalog(), current_schema();
