@@ -2,4 +2,5 @@
 
 | Date | Session | File |
 | --- | --- | --- |
+| 2025-07-17 | Query tags, predictive optimization query fixes, query relocation | [2025-07-17_query-tags-and-query-relocation.md](2025-07-17_query-tags-and-query-relocation.md) |
 | 2025-07-16 | Infra bundle scaffold — databricks.yml, secret scope, README, deploy.sh | [2025-07-16_infra-bundle-scaffold.md](2025-07-16_infra-bundle-scaffold.md) |
