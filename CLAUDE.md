@@ -120,6 +120,17 @@ dbxWearables/
 │   ├── healthKitTests/                    # Unit tests (models, services, mocks)
 │   └── healthKitUITests/                  # UI tests
 │
+├── androidHealthConnect/                  # Android Health Connect integration (placeholder)
+│   └── README.md
+├── samsungHealth/                         # Samsung Health SDK integration (placeholder)
+│   └── README.md
+├── fitbit/                                # Fitbit Web API integration (placeholder)
+│   └── README.md
+├── garmin/                                # Garmin Connect API integration (placeholder)
+│   └── README.md
+├── zeroBus/                               # Databricks-side ZeroBus ingestion service (placeholder)
+│   └── README.md
+│
 └── (future directories below)
 ```
 
