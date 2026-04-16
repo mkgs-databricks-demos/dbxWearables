@@ -42,7 +42,7 @@ resources:
         # Task 1: Find or create the ZeroBus service principal
         - task_key: ensure_service_principal
           notebook_task:
-            notebook_path: ../src/uc_setup/ensure-service-principal.py
+            notebook_path: ../src/uc_setup/ensure-service-principal.ipynb
             source: WORKSPACE
 
         # Task 2: DDL + grants — receives SPN application_id from task 1
