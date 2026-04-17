@@ -1,0 +1,26 @@
+# databricks.local.yml.example
+#
+# Copy this file to databricks.local.yml (gitignored) and fill in the
+# workspace-specific values for your deployment. databricks.local.yml is
+# auto-included by databricks.yml via `include: ["*.local.yml"]`.
+#
+# Alternatively, skip the file entirely and pass these values on the CLI:
+#
+#   databricks bundle deploy --target dev \
+#     --profile <your-profile> \
+#     --var catalog=<your-catalog> \
+#     --var run_as_user=<your-email> \
+#     --var tags_RemoveAfter=2027-04-16
+
+targets:
+  dev:
+    workspace:
+      # Either `profile` (recommended — reads host from ~/.databrickscfg)
+      # or an explicit `host` — do not set both.
+      profile: <your-databricks-cli-profile>
+      root_path: /Workspace/Users/${var.run_as_user}/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: <your-unity-catalog-catalog>
+      # schema: wearables          # Uncomment to override the default
+      run_as_user: <your-email@example.com>
+      tags_RemoveAfter: "2027-04-16"

@@ -89,7 +89,7 @@ Or use the backfill notebook: [`../notebooks/02_backfill_garmin.ipynb`](../noteb
 | `DATABRICKS_WORKSPACE_URL` | For push | Databricks workspace URL |
 | `DATABRICKS_CLIENT_ID` | For push | Service principal client ID |
 | `DATABRICKS_CLIENT_SECRET` | For push | Service principal client secret |
-| `DATABRICKS_CATALOG` | No | Unity Catalog name (default: `hls_fde_dev`) |
+| `DATABRICKS_CATALOG` | Yes | Unity Catalog name (no default) |
 | `DATABRICKS_SCHEMA` | No | Schema name (default: `wearables`) |
 | `DATABRICKS_BRONZE_TABLE` | No | Bronze table name (default: `wearables_zerobus`) |
 

@@ -19,8 +19,9 @@ class Settings(BaseSettings):
     databricks_client_id: str = ""
     databricks_client_secret: str = ""
 
-    # Unity Catalog target — aligned with zeroBus/dbxW_zerobus_infra
-    databricks_catalog: str = "hls_fde_dev"
+    # Unity Catalog target — supplied via env vars (see env.example).
+    # DATABRICKS_CATALOG is required; schema/table have sensible defaults.
+    databricks_catalog: str = ""
     databricks_schema: str = "wearables"
     databricks_bronze_table: str = "wearables_zerobus"
 
