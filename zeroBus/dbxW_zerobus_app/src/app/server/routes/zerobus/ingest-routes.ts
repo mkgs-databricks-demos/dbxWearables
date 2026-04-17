@@ -2,9 +2,30 @@
 //
 // POST /api/v1/healthkit/ingest — receives NDJSON payloads from the iOS
 //   HealthKit demo app and streams each line to the wearables_zerobus
-//   bronze table via the ZeroBus TypeScript SDK.
+//   bronze table via the ZeroBus REST API.
 //
 // GET  /api/v1/healthkit/health — lightweight health/readiness check.
+//
+// ── Content-Type handling ────────────────────────────────────────────────
+//
+// AppKit's server plugin registers a global express.json() middleware that
+// processes requests before route-level middleware. This creates two issues
+// for NDJSON payloads sent with Content-Type: application/x-ndjson:
+//
+//   1. Multi-line NDJSON (not valid JSON): express.json() rejects with 400
+//   2. Single-line NDJSON (valid JSON): express.json() parses it into an
+//      object, and our route handler sees an object instead of a string.
+//
+// Fix:
+//   - An error-recovery middleware catches JSON parse failures for NDJSON
+//     content types and recovers the raw body string from err.body.
+//   - extractNdjsonBody() handles all body states: string (from
+//     express.text()), object (from express.json()), Buffer, or undefined.
+//
+// Supported Content-Types:
+//   - application/x-ndjson  (standard NDJSON, used by iOS app)
+//   - application/ndjson    (alternative NDJSON MIME type)
+//   - text/plain            (fallback, bypasses JSON parser entirely)
 //
 // Request contract (iOS app → this endpoint):
 //   Content-Type: application/x-ndjson
@@ -17,7 +38,7 @@
 //   (compatible with healthKit/Models/APIResponse.swift — unknown keys ignored)
 
 import express from 'express';
-import type { Application, Request, Response } from 'express';
+import type { Application, Request, Response, NextFunction } from 'express';
 import { zeroBusService } from '../../services/zerobus-service';
 import type { WearablesRecord } from '../../services/zerobus-service';
 
@@ -31,12 +52,12 @@ const VALID_RECORD_TYPES = new Set([
   'deletes',
 ]);
 
-// ── NDJSON body parser ───────────────────────────────────────────────────
-// Parses the raw request body as UTF-8 text for NDJSON content types.
-// 10 MB limit aligns with ZeroBus per-record maximum.
+// ── Text body parser (fallback for text/plain requests) ──────────────────
+// Only handles text/plain; NDJSON content types are handled by the error
+// recovery middleware + extractNdjsonBody() below.
 
-const ndjsonParser = express.text({
-  type: ['application/x-ndjson', 'application/ndjson', 'text/plain'],
+const textParser = express.text({
+  type: ['text/plain'],
   limit: '10mb',
 });
 
@@ -79,6 +100,34 @@ function parseNdjson(raw: string): { lines: unknown[]; errors: string[] } {
   return { lines, errors };
 }
 
+/**
+ * Extract the NDJSON body string from the request, handling all possible
+ * body states after Express middleware processing:
+ *
+ *   - string:    express.text() parsed it, or error recovery set it
+ *   - Buffer:    express.raw() parsed it
+ *   - object:    express.json() parsed single-line NDJSON (valid JSON)
+ *   - undefined: no parser matched
+ */
+function extractNdjsonBody(req: Request): string {
+  if (typeof req.body === 'string') {
+    return req.body;
+  }
+  if (Buffer.isBuffer(req.body)) {
+    return req.body.toString('utf-8');
+  }
+  if (
+    req.body !== undefined &&
+    req.body !== null &&
+    typeof req.body === 'object'
+  ) {
+    // express.json() successfully parsed a single NDJSON line.
+    // Re-serialize back to a single-line NDJSON string.
+    return JSON.stringify(req.body);
+  }
+  return '';
+}
+
 // ── AppKit interface (only the server plugin is needed) ──────────────────
 
 interface AppKitServer {
@@ -103,18 +152,64 @@ export async function setupZeroBusRoutes(appkit: AppKitServer) {
   }
 
   appkit.server.extend((app) => {
+    // ── Error recovery for NDJSON content types ────────────────────────
+    //
+    // AppKit's global express.json() middleware rejects multi-line NDJSON
+    // (not valid JSON) with a 400 parse error. This error-handling
+    // middleware catches those failures, recovers the raw body string
+    // from the error object (body-parser stores it as err.body), and
+    // continues to the route handler.
+    //
+    // Express traverses the middleware stack for error handlers when
+    // next(err) is called. This handler must be registered BEFORE the
+    // route handler so Express finds it during error traversal.
+    //
+    // Flow (multi-line NDJSON with Content-Type: application/x-ndjson):
+    //   1. express.json() tries to parse → fails → next(err)
+    //   2. This error handler catches it → recovers err.body → next()
+    //   3. Route handler runs with req.body = raw NDJSON string
+
+    app.use(
+      '/api/v1/healthkit/ingest',
+      (
+        err: Error & { type?: string; body?: string; status?: number },
+        req: Request,
+        res: Response,
+        next: NextFunction,
+      ) => {
+        const contentType = (req.headers['content-type'] || '').toLowerCase();
+        const isNdjsonType =
+          contentType.includes('ndjson') || contentType.includes('text/plain');
+
+        if (err.type === 'entity.parse.failed' && isNdjsonType && err.body) {
+          // Recover the raw body from the failed JSON parse attempt.
+          // body-parser stores the raw string as err.body when parsing fails.
+          console.log(
+            `[ZeroBus] Recovered NDJSON body from JSON parse error (${err.body.length} bytes)`,
+          );
+          req.body = err.body;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (req as any)._body = true; // Tell downstream body parsers to skip
+          return next(); // Continue WITHOUT error → route handler runs
+        }
+
+        // Not a recoverable NDJSON parse failure — pass the error along
+        return next(err);
+      },
+    );
+
     // ── POST /api/v1/healthkit/ingest ────────────────────────────────
     //
     // 1. Validate X-Record-Type header
-    // 2. Parse NDJSON body into individual JSON objects
-    // 3. Build WearablesRecord per line (UUID, timestamp, VARIANT columns)
-    // 4. Batch-ingest via ZeroBus SDK
-    // 5. Block until all records are durable in the bronze table
+    // 2. Extract NDJSON body (handles string, object, Buffer states)
+    // 3. Parse NDJSON into individual JSON objects
+    // 4. Build WearablesRecord per line (UUID, timestamp, VARIANT columns)
+    // 5. Batch-ingest via ZeroBus REST API
     // 6. Return success response with record IDs
 
     app.post(
       '/api/v1/healthkit/ingest',
-      ndjsonParser,
+      textParser,
       async (req: Request, res: Response) => {
         const startMs = Date.now();
 
@@ -132,8 +227,8 @@ export async function setupZeroBusRoutes(appkit: AppKitServer) {
             return;
           }
 
-          // — Parse NDJSON body ─────────────────────────────────────────
-          const rawBody = typeof req.body === 'string' ? req.body : '';
+          // — Extract NDJSON body (handles all middleware states) ────────
+          const rawBody = extractNdjsonBody(req);
 
           if (!rawBody) {
             res.status(400).json({
@@ -163,7 +258,7 @@ export async function setupZeroBusRoutes(appkit: AppKitServer) {
             zeroBusService.buildRecord(line, headers, recordType),
           );
 
-          // — Ingest via ZeroBus SDK (blocks until durable) ─────────────
+          // — Ingest via ZeroBus REST API ───────────────────────────────
           const ingested = await zeroBusService.ingestRecords(records);
 
           const durationMs = Date.now() - startMs;
