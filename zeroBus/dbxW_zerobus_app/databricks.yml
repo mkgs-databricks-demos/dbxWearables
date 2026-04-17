@@ -69,6 +69,19 @@ variables:
       true = dashboard uses owner's credentials; false = viewer's credentials.
     default: false
 
+  # Lakebase Postgres — resource identifiers for the AppKit lakebase plugin.
+  # Obtain by running:
+  #   databricks postgres list-branches projects/{project-id}
+  #   databricks postgres list-databases {branch-name}
+  postgres_branch:
+    description: >
+      Full Lakebase Postgres branch resource name.
+      Format: projects/{project-id}/branches/{branch-id}
+  postgres_database:
+    description: >
+      Full Lakebase Postgres database resource name.
+      Format: projects/{project-id}/branches/{branch-id}/databases/{database-id}
+
   # Tags — applied to all deployed resources via presets
   tags_project:
     default: dbxWearables ZeroBus
@@ -115,6 +128,8 @@ targets:
       run_as_user: matthew.giglia@databricks.com
       client_id_dbs_key: client_id_${var.schema}
       client_secret_dbs_key: client_secret_${var.schema}
+      postgres_branch: projects/dbxw-zerobus-wearables/branches/production
+      postgres_database: projects/dbxw-zerobus-wearables/branches/production/databases/db-0k31-aj7nvq8pgr
 
   # ── hls_fde (production — same workspace as dev) ────────────────────────
   hls_fde:
@@ -140,7 +155,9 @@ targets:
       run_as_user: ${var.higher_level_service_principal}
       serverless_environment_version: "5"
       client_id_dbs_key: client_id_${var.schema}
-      client_secret_dbs_key: client_secret_${var.schema} 
+      client_secret_dbs_key: client_secret_${var.schema}
+      postgres_branch: projects/dbxw-zerobus-wearables/branches/production
+      postgres_database: projects/dbxw-zerobus-wearables/branches/production/databases/db-0k31-aj7nvq8pgr
     permissions:
       - user_name: matthew.giglia@databricks.com
         level: CAN_MANAGE

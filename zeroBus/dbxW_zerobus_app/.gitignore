@@ -1,1 +1,11 @@
 .databricks/
+
+# AppKit source (src/app/) build artifacts and dependencies
+src/app/node_modules/
+src/app/client/dist/
+src/app/dist/
+src/app/build/
+src/app/.env
+src/app/.smoke-test/
+src/app/test-results/
+src/app/playwright-report/

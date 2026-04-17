@@ -1,0 +1,34 @@
+# Runtime configuration for the AppKit application.
+#
+# Environment variables are injected from app resources defined in
+# resources/zerobus_ingest.app.yml via the valueFrom directive.
+#
+# Platform-injected (no valueFrom needed):
+#   PGHOST, PGPORT, PGDATABASE, PGUSER, PGSSLMODE — from postgres resource
+#   DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET — app's own SPN identity
+#
+# Custom env vars (from secret scope + postgres resource):
+#   LAKEBASE_ENDPOINT     — Lakebase endpoint path (from postgres resource)
+#   ZEROBUS_CLIENT_ID     — ZeroBus SPN application_id
+#   ZEROBUS_CLIENT_SECRET — ZeroBus SPN OAuth secret
+#   ZEROBUS_WORKSPACE_URL — Databricks workspace URL for SDK calls
+#   ZEROBUS_ENDPOINT      — ZeroBus Ingest server endpoint
+#   ZEROBUS_TARGET_TABLE  — Fully qualified bronze table name
+
+command: ['npm', 'run', 'start']
+env:
+  # Lakebase — endpoint path for AppKit lakebase plugin
+  - name: LAKEBASE_ENDPOINT
+    valueFrom: postgres
+
+  # ZeroBus Ingest SDK — credentials and config from infra bundle's secret scope
+  - name: ZEROBUS_CLIENT_ID
+    valueFrom: zerobus-client-id
+  - name: ZEROBUS_CLIENT_SECRET
+    valueFrom: zerobus-client-secret
+  - name: ZEROBUS_WORKSPACE_URL
+    valueFrom: zerobus-workspace-url
+  - name: ZEROBUS_ENDPOINT
+    valueFrom: zerobus-endpoint
+  - name: ZEROBUS_TARGET_TABLE
+    valueFrom: zerobus-target-table
