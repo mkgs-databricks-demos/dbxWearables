@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">dbx Wearables</string>
+    <string name="tab_dashboard">Dashboard</string>
+    <string name="tab_data">Data</string>
+    <string name="tab_payloads">Payloads</string>
+    <string name="tab_about">About</string>
+    <string name="sync_now">Sync Now</string>
+    <string name="health_connect_not_available">Health Connect is not available on this device.</string>
+    <string name="permissions_required">Health Connect permissions are required to sync data.</string>
+    <string name="grant_permissions">Grant Permissions</string>
+    <string name="no_data_yet">No data synced yet. Tap Sync Now to start.</string>
+    <string name="copy_to_clipboard">Copy to Clipboard</string>
+    <string name="copied">Copied to clipboard</string>
+    <string name="replay_onboarding">Replay Onboarding</string>
+</resources>

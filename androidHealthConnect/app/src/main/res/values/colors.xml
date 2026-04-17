@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="dbx_red">#FFFF3621</color>
+    <color name="dbx_orange">#FFFF6A33</color>
+    <color name="dbx_dark_teal">#FF1B3139</color>
+    <color name="dbx_navy">#FF0D2228</color>
+    <color name="dbx_green">#FF00A972</color>
+    <color name="dbx_yellow">#FFFFC107</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="black">#FF000000</color>
+</resources>
