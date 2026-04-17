@@ -71,22 +71,17 @@ resources:
         prevent_destroy: true
 
   # -------------------------------------------------------------------------
-  # Branch — production (default, protected)
+  # Branch — production (auto-created, not managed as a bundle resource)
   #
-  # The project auto-creates a "production" branch. This resource declaration
-  # sets protection and expiry policy. If the API rejects this on a fresh
-  # deploy (branch already exists), remove this block and configure the
-  # branch via the Lakebase UI or CLI instead.
+  # The project auto-creates a protected "production" branch with a
+  # read-write endpoint at creation time. Like the endpoint, the branch
+  # is NOT declared as a bundle resource because:
+  #   1. It already exists when the project is created
+  #   2. Terraform cannot import pre-existing branches without state surgery
+  #   3. Protection and expiry are correct by default
+  #
+  # To modify branch settings, use the Lakebase UI or CLI directly.
   # -------------------------------------------------------------------------
-  postgres_branches:
-    wearables_production:
-      parent: ${resources.postgres_projects.wearables_lakebase.id}
-      branch_id: production
-      no_expiry: true
-      is_protected: true
-
-      lifecycle:
-        prevent_destroy: true
 
 # ---------------------------------------------------------------------------
 # Target-specific overrides
