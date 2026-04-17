@@ -129,8 +129,8 @@ targets:
       catalog: hls_fde_dev
       schema: wearables
       run_as_user: matthew.giglia@databricks.com
-      client_id_dbs_key: client_id_${var.schema}
-      client_secret_dbs_key: client_secret_${var.schema}
+      client_id_dbs_key: client_id_dev_matthew_giglia_${var.schema}
+      client_secret_dbs_key: client_secret_dev_matthew_giglia_${var.schema}
 
   # ── hls_fde (production — same workspace as dev) ────────────────────────
   hls_fde:
