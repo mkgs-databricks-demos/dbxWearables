@@ -4,7 +4,7 @@
 
 All wearable data — including Garmin, HealthKit, and future sources — lands in the shared `wearables_zerobus` table managed by the `zeroBus/dbxW_zerobus_infra` DABs bundle.
 
-The source of truth for the bronze DDL is [`zeroBus/dbxW_zerobus_infra/src/uc_setup/target-table-ddl.sql`](../zeroBus/dbxW_zerobus_infra/src/uc_setup/target-table-ddl.sql).
+The source of truth for the bronze DDL is [`zeroBus/dbxW_zerobus_infra/src/uc_setup/target-table-ddl.sql`](../../zeroBus/dbxW_zerobus_infra/src/uc_setup/target-table-ddl.sql).
 
 ### Bronze Table Columns
 
@@ -80,7 +80,7 @@ WHERE record_type = 'daily_stats';
 
 ## Silver Layer (Planned): Normalized Typed Events
 
-The silver layer will parse the raw VARIANT body from the bronze table into strongly-typed metric records. This normalization logic is implemented in `garmin/pull/normalizer.py` (the `normalize()` function and `HealthEvent` dataclass) and is ready for use in silver views or Spark Declarative Pipelines.
+The silver layer will parse the raw VARIANT body from the bronze table into strongly-typed metric records. The `HealthEvent` dataclass is now the canonical platform-wide silver schema defined in [`providers/common/silver/health_event.py`](../common/silver/health_event.py). The Garmin-specific bronze-to-`HealthEvent` mapping logic is in [`providers/garmin/pull/normalizer.py`](pull/normalizer.py) (the `normalize()` function) and will be split into a `providers/garmin/silver/normalizer.py` for the Spark Declarative Pipeline to consume alongside every other provider's normalizer.
 
 ### Normalized Event Fields
 

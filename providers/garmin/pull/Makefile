@@ -17,13 +17,13 @@ garmin-login:
 	print('Tokens saved to ~/.garminconnect/garmin_tokens.json')"
 
 ingest:
-	python -m garmin.pull.runner --date $$(date -v-1d +%Y-%m-%d)
+	cd ../../.. && python -m providers.garmin.pull.runner --date $$(date -v-1d +%Y-%m-%d)
 
 ingest-dry-run:
-	python -m garmin.pull.runner --date $$(date -v-1d +%Y-%m-%d) --dry-run
+	cd ../../.. && python -m providers.garmin.pull.runner --date $$(date -v-1d +%Y-%m-%d) --dry-run
 
 ingest-to-file:
-	python -m garmin.pull.runner --date $$(date -v-1d +%Y-%m-%d) --output garmin_events.json
+	cd ../../.. && python -m providers.garmin.pull.runner --date $$(date -v-1d +%Y-%m-%d) --output garmin_events.json
 
 setup-secrets:
 	@echo "Pushing Garmin tokens to shared secret scope..."
@@ -40,10 +40,10 @@ backfill:
 	CURRENT=$$START; \
 	while [ "$$CURRENT" != "$$END" ]; do \
 	  echo "Ingesting $$CURRENT..."; \
-	  python -m garmin.pull.runner --date $$CURRENT || true; \
+	  (cd ../../.. && python -m providers.garmin.pull.runner --date $$CURRENT) || true; \
 	  CURRENT=$$(date -j -v+1d -f "%Y-%m-%d" $$CURRENT +%Y-%m-%d); \
 	done
 
 lint:
-	ruff check garmin/pull/
-	ruff format --check garmin/pull/
+	ruff check .
+	ruff format --check .

@@ -5,7 +5,7 @@ from datetime import date
 
 from garminconnect import Garmin, GarminConnectAuthenticationError
 
-from garmin.pull.config import get_settings
+from providers.garmin.pull.config import get_settings
 
 logger = logging.getLogger(__name__)
 

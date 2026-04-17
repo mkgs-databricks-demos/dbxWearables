@@ -43,19 +43,23 @@ make setup-secrets
 
 ## Running Locally
 
+Run from the **repo root** (the `providers.garmin.pull` package requires `providers/` on `sys.path`, which is automatic when cwd is the repo root):
+
 ```bash
 # Ingest yesterday's data
-python -m garmin.pull.runner
+python -m providers.garmin.pull.runner
 
 # Ingest a specific date
-python -m garmin.pull.runner --date 2026-04-10
+python -m providers.garmin.pull.runner --date 2026-04-10
 
 # Dry run (extract + build bronze rows, print summary, don't push)
-python -m garmin.pull.runner --date 2026-04-10 --dry-run
+python -m providers.garmin.pull.runner --date 2026-04-10 --dry-run
 
 # Write silver-layer normalized events to file
-python -m garmin.pull.runner --date 2026-04-10 --output events.json
+python -m providers.garmin.pull.runner --date 2026-04-10 --output events.json
 ```
+
+The Makefile targets (`make ingest`, `make ingest-dry-run`, etc.) already `cd` up to the repo root for you.
 
 ## Running as a Databricks Notebook
 

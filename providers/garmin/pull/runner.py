@@ -1,8 +1,8 @@
 """CLI runner for Garmin health data ingestion.
 
-Usage:
-    python -m garmin.pull.runner --date 2026-04-15
-    python -m garmin.pull.runner  # defaults to yesterday
+Usage (from repo root):
+    python -m providers.garmin.pull.runner --date 2026-04-15
+    python -m providers.garmin.pull.runner  # defaults to yesterday
 """
 from __future__ import annotations
 
@@ -12,9 +12,9 @@ import logging
 import sys
 from datetime import date, timedelta
 
-from garmin.pull.config import get_settings
-from garmin.pull.extractor import extract_daily
-from garmin.pull.normalizer import normalize, to_bronze_rows
+from providers.garmin.pull.config import get_settings
+from providers.garmin.pull.extractor import extract_daily
+from providers.garmin.pull.normalizer import normalize, to_bronze_rows
 
 logging.basicConfig(
     level=logging.INFO,

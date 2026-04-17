@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any
 
-from garmin.pull.config import get_settings
+from providers.garmin.pull.config import get_settings
 
 logger = logging.getLogger(__name__)
 
