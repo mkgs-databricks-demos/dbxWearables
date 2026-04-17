@@ -129,6 +129,7 @@ targets:
     resources:
       apps:
         zerobus_ingest:
+          name: ${bundle.target}-dbxw-0bus-ingest
           permissions:
             - user_name: matthew.giglia@databricks.com
               level: CAN_MANAGE
@@ -137,6 +138,7 @@ targets:
     resources:
       apps:
         zerobus_ingest:
+          name: ${bundle.target}-dbxw-0bus-ingest
           permissions:
             - user_name: matthew.giglia@databricks.com
               level: CAN_MANAGE
