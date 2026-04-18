@@ -97,6 +97,27 @@ function extractHeaders(req: Request): Record<string, string> {
 
 **Live table** — Ran `ALTER TABLE hls_fde_dev.dev_matthew_giglia_wearables.wearables_zerobus ADD COLUMNS (user_id STRING ...)` to add column. Existing rows have `NULL`; new rows default to `'anonymous'` until JWT auth is implemented.
 
+#### Phase 5: 3-Way User Identity Branch (extractUserFromToken)
+
+**Problem:** The Phase 4 `extractUserFromToken()` only checked `x-forwarded-email` (AppKit proxy header). This worked for workspace traffic (notebooks, jobs) but didn't establish the correct priority ordering for the eventual mobile app JWT auth path.
+
+**Insight from header analysis:** AppKit's proxy strips the `Authorization` header before forwarding to Express and injects `x-forwarded-*` headers. This means `Authorization: Bearer` is ONLY present when a client bypasses the proxy (= mobile app calling directly). The two auth paths are naturally mutually exclusive.
+
+**`ingest-routes.ts`** — Rewrote `extractUserFromToken()` as a 3-way priority branch:
+
+| Priority | Signal | Source | user_id value | Status |
+| --- | --- | --- | --- | --- |
+| 1 | `Authorization: Bearer <token>` | Mobile app (direct) | Lakebase UUID from JWT `sub` | **Placeholder** — logs token, returns `'anonymous'` |
+| 2 | `x-forwarded-email` header | Workspace (proxy) | User email (e.g. `matthew.giglia@databricks.com`) | **Active** |
+| 3 | Neither | No auth | `'anonymous'` | **Active** |
+
+**Also in this phase:**
+- Added `x-forwarded-access-token` to `HEADERS_TO_STRIP` blocklist (contained raw JWT being stored in bronze — security fix)
+- Updated header comment block to document the 3-way priority logic
+- Branch 1 includes TODO comments for future JWT validation implementation
+
+**Validation:** All 6 checks pass — notebook traffic correctly hits Branch 2, `user_id` = `current_user()`.
+
 ---
 
 ### Design Decisions
@@ -180,7 +201,7 @@ CREATE TABLE wearables_zerobus (
 
 | File | Status | Description |
 | --- | --- | --- |
-| `src/app/server/routes/zerobus/ingest-routes.ts` | Modified | Replaced HEADERS_TO_KEEP allowlist with HEADERS_TO_STRIP blocklist; opened X-Record-Type to any string; extract sourcePlatform |
+| `src/app/server/routes/zerobus/ingest-routes.ts` | Modified | Blocklist refactor; open record types; `source_platform` extraction; `user_id` via 3-way `extractUserFromToken()` (Bearer JWT placeholder → x-forwarded-email → anonymous); added `x-forwarded-access-token` to blocklist |
 | `src/app/server/services/zerobus-service.ts` | Modified | Added `source_platform` and `user_id` to WearablesRecord interface and buildRecord() |
 | `src/endpoint-validation/validate-zerobus-ingest` (notebook) | Modified | Added schema review cells (14-18), updated POST headers, query columns, analysis cells |
 | `dbxW_zerobus_infra: src/uc_setup/target-table-ddl` (notebook 2686724970547991) | Modified | Added source_platform and user_id to CREATE TABLE DDL; ALTER TABLE ADD COLUMNS for both |
@@ -193,8 +214,8 @@ CREATE TABLE wearables_zerobus (
 
 ### Next Steps
 
-1. **Redeploy app** — `databricks bundle deploy --target dev` to pick up zerobus-service.ts (`user_id`) and ingest-routes.ts changes
-2. **Re-run validation notebook** — Verify `source_platform` populated, `user_id = 'anonymous'`, full headers captured
+1. ~~Redeploy app~~ — Done (deployment `01f13b0209361f969ad6f7859675a990`)
+2. ~~Re-run validation notebook~~ — 6/6 validations pass (`user_id` = `current_user()` via `x-forwarded-email`)
 3. **iOS integration test** — Set `DBX_API_BASE_URL` and run end-to-end sync from device
 4. **Implement JWT auth** — Phase 1-3 from `user-identity-todo.md` (Lakebase schema → auth endpoints → JWT middleware)
 5. **Define SDP pipeline** — Silver layer parsing `body` VARIANT per `record_type`, dedup on `body:uuid`

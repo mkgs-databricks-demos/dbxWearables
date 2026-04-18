@@ -38,10 +38,21 @@
 //
 // ── User identity extraction ─────────────────────────────────────
 //
-// AppKit's reverse proxy validates the Bearer token, strips the
-// Authorization header, and injects x-forwarded-email with the user's
-// email. We use this directly — no JWT decoding needed. Falls back to
-// 'anonymous' if the header is missing (unauthenticated requests).
+// Three-way priority for determining user_id:
+//
+//   1. Authorization: Bearer <token> — Direct client (iOS/Android).
+//      AppKit's proxy strips this header, so if it's present the request
+//      bypassed the proxy (= mobile app calling directly). When JWT auth
+//      is implemented, this token will be validated and its `sub` claim
+//      (Lakebase user UUID) becomes the user_id. Until then, the token
+//      is logged but untrusted → 'anonymous'.
+//
+//   2. x-forwarded-email — Workspace traffic (notebook, job, service).
+//      Injected by AppKit's reverse proxy after OAuth validation. Can't
+//      be spoofed (proxy strips client-supplied forwarded headers).
+//      Value matches Spark SQL current_user() — e.g. "user@databricks.com".
+//
+//   3. Neither — 'anonymous'. No auth context available.
 //
 // ── Record type strategy ─────────────────────────────────────────────
 //
@@ -163,26 +174,49 @@ function extractNdjsonBody(req: Request): string {
 }
 
 /**
- * Extract user identity from the AppKit-injected forwarded headers.
+ * Extract user identity — priority-ordered, 3-way branch.
  *
- * AppKit's reverse proxy validates the Bearer token and strips the
- * Authorization header before forwarding to Express. The proxy injects:
- *   x-forwarded-email             — user's email (e.g. "user@databricks.com")
- *   x-forwarded-preferred-username — display name
- *   x-forwarded-user              — workspace user ID
- *   x-forwarded-access-token      — original JWT (for downstream use)
+ * 1. Authorization: Bearer <token>
+ *    If present, the request came directly from a mobile client (iOS/
+ *    Android) — AppKit's proxy strips this header for workspace traffic.
+ *    TODO: validate app-issued JWT signature, check expiry, extract
+ *    `sub` claim (Lakebase users.user_id UUID). Until JWT validation is
+ *    implemented, the token is logged but not trusted → 'anonymous'.
  *
- * We use x-forwarded-email as the user_id since it matches
- * current_user() in Spark SQL and is human-readable.
+ * 2. x-forwarded-email
+ *    Workspace traffic (notebook, job, service). Injected by AppKit's
+ *    reverse proxy after OAuth validation. Trustworthy — proxy strips
+ *    any client-supplied x-forwarded-* headers before injecting its own.
+ *    Value: user email (e.g. "matthew.giglia@databricks.com"), matches
+ *    Spark SQL current_user().
  *
- * Falls back to 'anonymous' for unauthenticated requests (e.g., iOS
- * app before JWT auth is implemented, or development/testing).
+ * 3. Neither → 'anonymous'
+ *    No authentication context. Pre-auth clients, health checks, or
+ *    development/testing.
  */
 function extractUserFromToken(req: Request): string {
+  // ── Branch 1: Direct client with Bearer token (mobile app) ──────
+  const authHeader = req.headers['authorization'];
+  if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+    // TODO: Replace this placeholder with real JWT validation:
+    //   1. Verify signature against app secret (from dbxw_zerobus_secrets scope)
+    //   2. Check exp claim (reject expired tokens)
+    //   3. Extract sub claim → Lakebase users.user_id UUID
+    //   4. Return the UUID as user_id
+    console.info(
+      '[ZeroBus] Bearer token received — JWT validation not yet implemented, user_id set to anonymous',
+    );
+    return 'anonymous';
+  }
+
+  // ── Branch 2: Workspace traffic via AppKit proxy ────────────────
   const email = req.headers['x-forwarded-email'];
-  return typeof email === 'string' && email.length > 0
-    ? email
-    : 'anonymous';
+  if (typeof email === 'string' && email.length > 0) {
+    return email;
+  }
+
+  // ── Branch 3: No auth context ───────────────────────────────────
+  return 'anonymous';
 }
 
 // ── AppKit interface (only the server plugin is needed) ────────────────
