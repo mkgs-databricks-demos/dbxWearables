@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS wearables_zerobus
   body VARIANT COMMENT 'Raw NDJSON line payload stored as VARIANT for flexible JSON querying',
   headers VARIANT COMMENT 'Full HTTP request headers as JSON — includes X-Record-Type, X-Device-Id, etc.',
   record_type STRING COMMENT 'Extracted from X-Record-Type header (samples, workouts, sleep, activity_summaries, deletes)',
+  source_platform STRING COMMENT 'Extracted from X-Platform header — identifies data source (apple_healthkit, android_health_connect, etc.)',
   CONSTRAINT wearables_zerobus_pk PRIMARY KEY (record_id)
 )
 USING DELTA
@@ -55,6 +56,23 @@ TBLPROPERTIES (
   'quality' = 'bronze',
   'pipeline' = 'dbxw_zerobus',
   'description' = 'ZeroBus streaming target table for wearable health data'
+);
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Schema Evolution — Add source_platform Column
+-- Schema evolution: adds the source_platform column to an existing table
+-- that was created before this column was added to the DDL.
+-- Existing rows will have NULL for source_platform (backfill not needed —
+-- the silver layer can coalesce from headers::"x-platform" if required).
+--
+-- Note: ADD COLUMNS is idempotent in practice — if the column already exists
+-- with the same type, Databricks silently succeeds. If it exists with a
+-- different type, the command will fail (which is the correct behavior).
+
+ALTER TABLE wearables_zerobus
+ADD COLUMNS (
+  source_platform STRING COMMENT 'Extracted from X-Platform header — identifies data source (apple_healthkit, android_health_connect, etc.)'
 );
 
 -- COMMAND ----------

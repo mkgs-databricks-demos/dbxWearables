@@ -6,7 +6,7 @@
 //
 // GET  /api/v1/healthkit/health — lightweight health/readiness check.
 //
-// ── Content-Type handling ────────────────────────────────────────────────
+// ── Content-Type handling ──────────────────────────────────────────────
 //
 // AppKit's server plugin registers a global express.json() middleware that
 // processes requests before route-level middleware. This creates two issues
@@ -30,19 +30,20 @@
 // Request contract (iOS app → this endpoint):
 //   Content-Type: application/x-ndjson
 //   X-Record-Type: samples | workouts | sleep | activity_summaries | deletes
+//   X-Platform: apple_healthkit (identifies data source platform)
 //   Body: one JSON object per line (NDJSON)
 //
 // Response contract (this endpoint → iOS app):
 //   { status: "success"|"error", message: string, record_id?: string,
 //     records_ingested?: number, record_ids?: string[], duration_ms?: number }
-//   (compatible with healthKit/Models/APIResponse.swift — unknown keys ignored)
+//   (compatible with iOS APIResponse.swift — unknown keys ignored)
 
 import express from 'express';
 import type { Application, Request, Response, NextFunction } from 'express';
 import { zeroBusService } from '../../services/zerobus-service';
 import type { WearablesRecord } from '../../services/zerobus-service';
 
-// ── Valid X-Record-Type values (matches iOS record type enum) ────────────
+// ── Valid X-Record-Type values (matches iOS record type enum) ──────────
 
 const VALID_RECORD_TYPES = new Set([
   'samples',
@@ -52,7 +53,7 @@ const VALID_RECORD_TYPES = new Set([
   'deletes',
 ]);
 
-// ── Text body parser (fallback for text/plain requests) ──────────────────
+// ── Text body parser (fallback for text/plain requests) ────────────────
 // Only handles text/plain; NDJSON content types are handled by the error
 // recovery middleware + extractNdjsonBody() below.
 
@@ -61,12 +62,15 @@ const textParser = express.text({
   limit: '10mb',
 });
 
-// ── Helpers ──────────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────
 
 /** Headers worth preserving alongside each record for debugging/audit. */
 const HEADERS_TO_KEEP = [
   'x-record-type',
   'x-device-id',
+  'x-platform',
+  'x-app-version',
+  'x-upload-timestamp',
   'x-sync-session-id',
   'x-batch-index',
   'x-batch-count',
@@ -128,7 +132,7 @@ function extractNdjsonBody(req: Request): string {
   return '';
 }
 
-// ── AppKit interface (only the server plugin is needed) ──────────────────
+// ── AppKit interface (only the server plugin is needed) ────────────────
 
 interface AppKitServer {
   server: {
@@ -136,7 +140,7 @@ interface AppKitServer {
   };
 }
 
-// ── Route registration ───────────────────────────────────────────────────
+// ── Route registration ─────────────────────────────────────────────────
 
 export async function setupZeroBusRoutes(appkit: AppKitServer) {
   // Pre-flight: check env vars at startup (stream created lazily on first request)
@@ -152,7 +156,7 @@ export async function setupZeroBusRoutes(appkit: AppKitServer) {
   }
 
   appkit.server.extend((app) => {
-    // ── Error recovery for NDJSON content types ────────────────────────
+    // ── Error recovery for NDJSON content types ────────────────────
     //
     // AppKit's global express.json() middleware rejects multi-line NDJSON
     // (not valid JSON) with a 400 parse error. This error-handling
@@ -198,7 +202,7 @@ export async function setupZeroBusRoutes(appkit: AppKitServer) {
       },
     );
 
-    // ── POST /api/v1/healthkit/ingest ────────────────────────────────
+    // ── POST /api/v1/healthkit/ingest ────────────────────────────
     //
     // 1. Validate X-Record-Type header
     // 2. Extract NDJSON body (handles string, object, Buffer states)
@@ -214,7 +218,7 @@ export async function setupZeroBusRoutes(appkit: AppKitServer) {
         const startMs = Date.now();
 
         try {
-          // — Validate X-Record-Type header ─────────────────────────────
+          // — Validate X-Record-Type header ─────────────────────────
           const recordType = (
             req.headers['x-record-type'] as string | undefined
           )?.toLowerCase();
@@ -254,11 +258,13 @@ export async function setupZeroBusRoutes(appkit: AppKitServer) {
 
           // — Build records matching the bronze table schema ────────────
           const headers = extractHeaders(req);
+          const sourcePlatform =
+            (req.headers['x-platform'] as string | undefined)?.toLowerCase() || 'unknown';
           const records: WearablesRecord[] = lines.map((line) =>
-            zeroBusService.buildRecord(line, headers, recordType),
+            zeroBusService.buildRecord(line, headers, recordType, sourcePlatform),
           );
 
-          // — Ingest via ZeroBus REST API ───────────────────────────────
+          // — Ingest via ZeroBus REST API ───────────────────────
           const ingested = await zeroBusService.ingestRecords(records);
 
           const durationMs = Date.now() - startMs;
@@ -266,7 +272,7 @@ export async function setupZeroBusRoutes(appkit: AppKitServer) {
             `[ZeroBus] Ingested ${ingested} ${recordType} record(s) in ${durationMs}ms`,
           );
 
-          // — Success response ──────────────────────────────────────────
+          // — Success response ──────────────────────────────────
           // Compatible with iOS APIResponse.swift (unknown keys ignored
           // by Swift's Codable decoder). Single-record requests get a
           // top-level record_id for backwards compatibility.
@@ -291,7 +297,7 @@ export async function setupZeroBusRoutes(appkit: AppKitServer) {
       },
     );
 
-    // ── GET /api/v1/healthkit/health ──────────────────────────────────
+    // ── GET /api/v1/healthkit/health ──────────────────────────────
 
     app.get('/api/v1/healthkit/health', (_req: Request, res: Response) => {
       const envCheck = zeroBusService.checkEnv();

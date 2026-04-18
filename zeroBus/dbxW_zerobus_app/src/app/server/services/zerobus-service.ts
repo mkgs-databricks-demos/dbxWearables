@@ -16,11 +16,12 @@
 //   ZEROBUS_CLIENT_SECRET — ZeroBus SPN OAuth secret
 //
 // Table schema (hls_fde_dev.dev_matthew_giglia_wearables.wearables_zerobus):
-//   record_id   STRING  NOT NULL  — Server-generated GUID (PK)
-//   ingested_at TIMESTAMP         — Epoch microseconds
-//   body        VARIANT           — Raw NDJSON line as JSON-encoded string
-//   headers     VARIANT           — HTTP request headers as JSON-encoded string
-//   record_type STRING            — From X-Record-Type header
+//   record_id       STRING  NOT NULL  — Server-generated GUID (PK)
+//   ingested_at     TIMESTAMP         — Epoch microseconds
+//   body            VARIANT           — Raw NDJSON line as JSON-encoded string
+//   headers         VARIANT           — HTTP request headers as JSON-encoded string
+//   record_type     STRING            — From X-Record-Type header
+//   source_platform STRING            — From X-Platform header (e.g. "apple_healthkit")
 //
 // REST API reference:
 //   https://docs.databricks.com/aws/en/ingestion/zerobus-ingest/
@@ -30,11 +31,12 @@ import crypto from 'node:crypto';
 // ── Types matching the bronze table schema ───────────────────────────────
 
 export interface WearablesRecord {
-  record_id: string;    // NOT NULL PK — crypto.randomUUID()
-  ingested_at: number;  // TIMESTAMP   — epoch microseconds (Date.now() * 1000)
-  body: string;         // VARIANT     — JSON.stringify(parsedNdjsonLine)
-  headers: string;      // VARIANT     — JSON.stringify(httpHeaders)
-  record_type: string;  // STRING      — e.g. "samples", "workouts", "sleep"
+  record_id: string;       // NOT NULL PK — crypto.randomUUID()
+  ingested_at: number;     // TIMESTAMP   — epoch microseconds (Date.now() * 1000)
+  body: string;            // VARIANT     — JSON.stringify(parsedNdjsonLine)
+  headers: string;         // VARIANT     — JSON.stringify(httpHeaders)
+  record_type: string;     // STRING      — e.g. "samples", "workouts", "sleep"
+  source_platform: string; // STRING      — e.g. "apple_healthkit", "android_health_connect"
 }
 
 // ── Required env var names ───────────────────────────────────────────────
@@ -203,6 +205,7 @@ class ZeroBusService {
     body: unknown,
     headers: Record<string, string>,
     recordType: string,
+    sourcePlatform: string,
   ): WearablesRecord {
     return {
       record_id: crypto.randomUUID(),
@@ -210,6 +213,7 @@ class ZeroBusService {
       body: JSON.stringify(body), // VARIANT — JSON-encoded string
       headers: JSON.stringify(headers), // VARIANT — JSON-encoded string
       record_type: recordType,
+      source_platform: sourcePlatform,
     };
   }
 
