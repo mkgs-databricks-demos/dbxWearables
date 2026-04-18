@@ -40,8 +40,10 @@ CREATE TABLE IF NOT EXISTS wearables_zerobus
   record_id STRING NOT NULL COMMENT 'Server-generated GUID for each ingested record',
   ingested_at TIMESTAMP COMMENT 'Server-side ingestion timestamp',
   body VARIANT COMMENT 'Raw NDJSON line payload stored as VARIANT for flexible JSON querying',
-  headers VARIANT COMMENT 'Full HTTP request headers as JSON — includes X-Record-Type, X-Device-Id, etc.',
-  record_type STRING COMMENT 'Extracted from X-Record-Type header (samples, workouts, sleep, activity_summaries, deletes)',
+  headers VARIANT COMMENT 'All HTTP headers except auth/cookie (blocklist stripped)',
+  record_type STRING COMMENT 'Extracted from X-Record-Type header — any non-empty string (open validation)',
+  source_platform STRING COMMENT 'Extracted from X-Platform header — identifies data source (apple_healthkit, android_health_connect, etc.)',
+  user_id STRING COMMENT 'App-authenticated user ID from JWT claims — NULL until JWT auth is implemented',
   CONSTRAINT wearables_zerobus_pk PRIMARY KEY (record_id)
 )
 USING DELTA
@@ -56,6 +58,25 @@ TBLPROPERTIES (
   'pipeline' = 'dbxw_zerobus',
   'description' = 'ZeroBus streaming target table for wearable health data'
 );
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Schema Evolution — Add source_platform Column
+-- MAGIC %skip
+-- MAGIC -- Schema evolution: adds columns to an existing table that was created
+-- MAGIC -- before these columns were added to the DDL.
+-- MAGIC -- Existing rows will have NULL for these columns (backfill not needed —
+-- MAGIC -- the silver layer can coalesce from headers::"x-platform" if required).
+-- MAGIC --
+-- MAGIC -- Note: ADD COLUMNS is idempotent in practice — if the column already exists
+-- MAGIC -- with the same type, Databricks silently succeeds. If it exists with a
+-- MAGIC -- different type, the command will fail (which is the correct behavior).
+-- MAGIC
+-- MAGIC ALTER TABLE wearables_zerobus
+-- MAGIC ADD COLUMNS (
+-- MAGIC   source_platform STRING COMMENT 'Extracted from X-Platform header — identifies data source (apple_healthkit, android_health_connect, etc.)',
+-- MAGIC   user_id STRING COMMENT 'App-authenticated user ID from JWT claims — NULL until JWT auth is implemented'
+-- MAGIC );
 
 -- COMMAND ----------
 
