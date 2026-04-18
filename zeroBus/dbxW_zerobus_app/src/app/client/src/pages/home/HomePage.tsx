@@ -16,6 +16,7 @@ import {
   Trash2,
   Database,
 } from 'lucide-react';
+import { Link } from 'react-router';
 
 /* ═══════════════════════════════════════════════════════════════════════
    HomePage — Landing page for the dbxWearables ZeroBus Gateway
@@ -73,18 +74,18 @@ function HeroSection() {
             </p>
 
             <div className="flex justify-center lg:justify-start gap-4 mt-10">
-              <a
-                href="/docs"
+              <Link
+                to="/docs"
                 className="gradient-red text-white px-6 py-3 rounded-lg font-semibold text-sm shadow-lg shadow-[var(--dbx-red)]/30 hover:shadow-[var(--dbx-red)]/50 transition-all"
               >
                 View API Docs
-              </a>
-              <a
-                href="/health"
+              </Link>
+              <Link
+                to="/status"
                 className="bg-white/10 border border-white/20 text-white px-6 py-3 rounded-lg font-semibold text-sm hover:bg-white/20 transition-all"
               >
                 System Health
-              </a>
+              </Link>
             </div>
 
             {/* Powered by logo */}

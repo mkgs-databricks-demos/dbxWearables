@@ -8,7 +8,7 @@ import {
 
 const navItems = [
   { to: '/', label: 'Overview', icon: Home, end: true },
-  { to: '/health', label: 'Health Status', icon: Activity },
+  { to: '/status', label: 'Health Status', icon: Activity },
   { to: '/docs', label: 'API Docs', icon: FileText },
   { to: '/lakebase', label: 'Lakebase', icon: Database },
 ];

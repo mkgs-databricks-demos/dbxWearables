@@ -83,7 +83,7 @@ const router = createBrowserRouter([
     element: <Layout />,
     children: [
       { path: '/', element: <HomePage /> },
-      { path: '/health', element: <HealthPage /> },
+      { path: '/status', element: <HealthPage /> },
       { path: '/docs', element: <DocsPage /> },
       { path: '/lakebase', element: <LakebasePage /> },
     ],
