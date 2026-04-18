@@ -23,7 +23,7 @@ export function DocsPage() {
       {/* Header */}
       <div className="mb-10">
         <div className="flex items-center gap-3 mb-2">
-          <FileText className="h-8 w-8 text-[var(--dbx-red)]" />
+          <img src="/images/databricks-symbol-color.svg" alt="" className="h-8 w-8" />
           <h1 className="text-3xl font-bold text-[var(--foreground)]">API Documentation</h1>
         </div>
         <p className="text-[var(--muted-foreground)]">

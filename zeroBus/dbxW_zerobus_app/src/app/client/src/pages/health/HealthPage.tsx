@@ -64,7 +64,7 @@ export function HealthPage() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold text-[var(--foreground)] flex items-center gap-3">
-            <Activity className="h-8 w-8 text-[var(--dbx-red)]" />
+            <img src="/images/databricks-symbol-color.svg" alt="" className="h-8 w-8" />
             System Health
           </h1>
           <p className="text-[var(--muted-foreground)] mt-1">
@@ -224,7 +224,7 @@ function EnvInfoSection() {
   return (
     <div className="mt-12 bg-[var(--dbx-dark-teal)] rounded-xl p-6 text-white">
       <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-        <Wifi className="h-5 w-5" />
+        <img src="/images/databricks-symbol-light.svg" alt="" className="h-5 w-5" />
         Environment Configuration
       </h3>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">

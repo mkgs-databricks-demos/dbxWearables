@@ -26,7 +26,11 @@ export function Navbar() {
       <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
         {/* Logo + Title */}
         <NavLink to="/" className="flex items-center gap-3 group">
-          <DatabricksLogo className="h-8 w-8 group-hover:scale-105 transition-transform" />
+          <img
+            src="/images/databricks-symbol-light.svg"
+            alt="Databricks"
+            className="h-8 w-8 group-hover:scale-105 transition-transform"
+          />
           <div className="flex flex-col">
             <span className="text-white font-bold text-lg leading-tight tracking-tight">
               dbxWearables
@@ -53,34 +57,5 @@ export function Navbar() {
         </nav>
       </div>
     </header>
-  );
-}
-
-function DatabricksLogo({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 36 36"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-    >
-      <path
-        d="M18 0L3.6 8.1v6.525L18 6.525l14.4 8.1V8.1L18 0z"
-        fill="#FF3621"
-      />
-      <path
-        d="M3.6 17.775L18 25.875l14.4-8.1v-3.15L18 22.725 3.6 14.625v3.15z"
-        fill="#FF3621"
-      />
-      <path
-        d="M18 28.8L3.6 20.7v3.15L18 31.95l14.4-8.1V20.7L18 28.8z"
-        fill="#FF3621"
-      />
-      <path
-        d="M18 34.875L3.6 26.775V29.925L18 38.025l14.4-8.1v-3.15L18 34.875z"
-        fill="#FF3621"
-        opacity="0.6"
-      />
-    </svg>
   );
 }
