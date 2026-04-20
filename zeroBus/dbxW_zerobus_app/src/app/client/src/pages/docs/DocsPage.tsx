@@ -4,11 +4,11 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  Send,
   ArrowUpRight,
   Tag,
   AlertCircle,
 } from 'lucide-react';
+import { BrandIcon } from '@/components/BrandIcon';
 
 /* ═══════════════════════════════════════════════════════════════════
    DocsPage — API Documentation (Swagger-style)
@@ -86,7 +86,7 @@ function IngestEndpoint() {
           {/* Headers */}
           <div>
             <h4 className="font-bold text-sm text-[var(--foreground)] mb-3 flex items-center gap-2">
-              <Tag className="h-4 w-4 text-[var(--dbx-red)]" />
+              <Tag className="h-4 w-4 text-[var(--dbx-lava-600)]" />
               Request Headers
             </h4>
             <div className="border border-[var(--border)] rounded-lg overflow-hidden">
@@ -167,9 +167,9 @@ function IngestEndpoint() {
           <div>
             <button
               onClick={() => setTryItOpen(!tryItOpen)}
-              className="flex items-center gap-2 text-sm font-medium text-[var(--dbx-red)] hover:text-[var(--dbx-lava-500)] transition-colors"
+              className="flex items-center gap-2 text-sm font-medium text-[var(--dbx-lava-600)] hover:text-[var(--dbx-lava-500)] transition-colors"
             >
-              <Send className="h-4 w-4" />
+              <BrandIcon name="data-flow" className="h-4 w-4" />
               Try it out
               {tryItOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
             </button>
@@ -179,7 +179,7 @@ function IngestEndpoint() {
           {/* cURL example */}
           <div>
             <h4 className="font-bold text-sm text-[var(--foreground)] mb-3 flex items-center gap-2">
-              <ArrowUpRight className="h-4 w-4 text-[var(--dbx-red)]" />
+              <ArrowUpRight className="h-4 w-4 text-[var(--dbx-lava-600)]" />
               cURL Example
             </h4>
             <CodeBlock
@@ -253,7 +253,7 @@ function HealthEndpoint() {
 
           <div>
             <h4 className="font-bold text-sm text-[var(--foreground)] mb-3 flex items-center gap-2">
-              <ArrowUpRight className="h-4 w-4 text-[var(--dbx-red)]" />
+              <ArrowUpRight className="h-4 w-4 text-[var(--dbx-lava-600)]" />
               cURL Example
             </h4>
             <CodeBlock
@@ -339,7 +339,7 @@ function TryItPanel() {
         disabled={loading}
         className="gradient-red text-white px-5 py-2 rounded-lg text-sm font-medium shadow-md hover:shadow-lg transition-all disabled:opacity-60 flex items-center gap-2"
       >
-        <Send className="h-4 w-4" />
+        <BrandIcon name="data-flow" className="h-4 w-4" />
         {loading ? 'Sending...' : 'Send Request'}
       </button>
 

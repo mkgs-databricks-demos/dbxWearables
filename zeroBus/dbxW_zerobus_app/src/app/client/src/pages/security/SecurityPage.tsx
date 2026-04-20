@@ -1,19 +1,13 @@
 import { useState } from 'react';
 import {
-  Shield,
-  Lock,
-  Key,
-  Smartphone,
-  Server,
-  Database,
   Clock,
   ChevronDown,
   ChevronRight,
   UserCheck,
   RefreshCw,
-  Fingerprint,
   AlertTriangle,
 } from 'lucide-react';
+import { BrandIcon } from '@/components/BrandIcon';
 
 /* ═══════════════════════════════════════════════════════════════════
    SecurityPage — Authentication & Identity architecture
@@ -47,7 +41,7 @@ function HeroSection() {
       </div>
       <div className="max-w-5xl mx-auto relative z-10">
         <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/10 border border-white/20 text-sm mb-6">
-          <Shield className="h-4 w-4 text-[var(--dbx-lava-500)]" />
+          <BrandIcon name="data-security" className="h-4 w-4 text-[var(--dbx-lava-500)]" />
           App-Managed JWT Auth with Lakebase User Registry
         </div>
         <h1 className="text-4xl font-bold mb-3 tracking-tight">
@@ -89,7 +83,7 @@ function AuthFlowDiagram() {
 function TwoLayerModel() {
   const layers = [
     {
-      icon: Smartphone,
+      brandKey: 'smartphone',
       direction: 'User → App',
       title: 'User Authentication',
       mechanism: 'App-issued JWT via Sign in with Apple',
@@ -104,7 +98,7 @@ function TwoLayerModel() {
       ],
     },
     {
-      icon: Server,
+      brandKey: 'webhook',
       direction: 'App → Workspace',
       title: 'Service Principal Auth',
       mechanism: 'M2M OAuth client credentials',
@@ -134,7 +128,7 @@ function TwoLayerModel() {
             <div key={i} className="bg-[var(--card)] border border-[var(--border)] rounded-xl overflow-hidden">
               <div className="bg-[var(--dbx-navy-800)] p-5 text-white">
                 <div className="flex items-center gap-3 mb-2">
-                  <layer.icon className="h-6 w-6" />
+                  {'brandKey' in layer ? <BrandIcon name={layer.brandKey} className="h-6 w-6" /> : null}
                   <span className="text-xs font-mono text-gray-400">{layer.direction}</span>
                   <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${layer.statusColor}`}>
                     {layer.status}
@@ -217,7 +211,7 @@ function SignInWithApple() {
         {/* Why not HealthKit for identity */}
         <div className="mt-8 bg-[var(--card)] border border-[var(--border)] rounded-xl p-6">
           <h4 className="font-bold text-[var(--foreground)] mb-2 flex items-center gap-2">
-            <Fingerprint className="h-5 w-5 text-[var(--dbx-red)]" />
+            <BrandIcon name="authentication" className="h-5 w-5 text-[var(--dbx-lava-600)]" />
             Why HealthKit Can&apos;t Identify Users
           </h4>
           <p className="text-sm text-[var(--muted-foreground)] leading-relaxed">
@@ -242,7 +236,7 @@ function TokenLifecycle() {
       iosStorage: 'Transient (not stored)',
       serverStorage: 'Not stored',
       purpose: 'Exchanged once during Sign in with Apple → validates user identity',
-      icon: Fingerprint,
+      brandKey: 'authentication',
     },
     {
       name: 'App Access JWT',
@@ -250,7 +244,7 @@ function TokenLifecycle() {
       iosStorage: 'Keychain (KeychainHelper)',
       serverStorage: 'Not stored (stateless)',
       purpose: 'Bearer token for all API calls — carries user_id in sub claim',
-      icon: Key,
+      brandKey: 'encryption',
     },
     {
       name: 'App Refresh Token',
@@ -276,11 +270,11 @@ function TokenLifecycle() {
             <div key={i} className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 hover:shadow-md transition-shadow">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 rounded-lg bg-[var(--dbx-navy-800)] flex items-center justify-center">
-                  <t.icon className="h-5 w-5 text-white" />
+                  {'brandKey' in t ? <BrandIcon name={t.brandKey} className="h-5 w-5" /> : <t.icon className="h-5 w-5 text-white" />}
                 </div>
                 <div>
                   <h3 className="font-bold text-sm text-[var(--foreground)]">{t.name}</h3>
-                  <span className="text-xs font-mono text-[var(--dbx-red)]">{t.lifetime}</span>
+                  <span className="text-xs font-mono text-[var(--dbx-lava-600)]">{t.lifetime}</span>
                 </div>
               </div>
               <p className="text-xs text-[var(--muted-foreground)] leading-relaxed mb-3">{t.purpose}</p>
@@ -301,7 +295,7 @@ function TokenLifecycle() {
         {/* JWT Claims */}
         <div className="mt-8">
           <h4 className="font-bold text-[var(--foreground)] mb-3 flex items-center gap-2">
-            <Key className="h-5 w-5 text-[var(--dbx-red)]" />
+            <BrandIcon name="encryption" className="h-5 w-5 text-[var(--dbx-lava-600)]" />
             JWT Access Token Claims
           </h4>
           <div className="code-block text-sm">
@@ -410,7 +404,7 @@ function LakebaseRegistry() {
           />
           <TableCard
             name="devices"
-            icon={Smartphone}
+            brandKey="smartphone"
             desc="Links device installs to users. A single user with iPhone + iPad = two device rows."
             columns={[
               { name: 'device_id', type: 'TEXT', note: 'PRIMARY KEY' },
@@ -422,7 +416,7 @@ function LakebaseRegistry() {
           />
           <TableCard
             name="refresh_tokens"
-            icon={Key}
+            brandKey="encryption"
             desc="SHA-256 hashes of active refresh tokens. Raw tokens are never stored server-side."
             columns={[
               { name: 'token_hash', type: 'TEXT', note: 'PRIMARY KEY' },
@@ -439,17 +433,18 @@ function LakebaseRegistry() {
 }
 
 function TableCard({
-  name, icon: Icon, desc, columns,
+  name, icon: Icon, brandKey, desc, columns,
 }: {
   name: string;
-  icon: typeof Database;
+  icon?: React.ComponentType<{ className?: string }>;
+  brandKey?: import('@/icons').IconKey;
   desc: string;
   columns: { name: string; type: string; note: string }[];
 }) {
   return (
     <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl overflow-hidden">
       <div className="bg-[var(--dbx-navy-800)] p-4 text-white flex items-center gap-3">
-        <Icon className="h-5 w-5" />
+        {brandKey ? <BrandIcon name={brandKey} className="h-5 w-5" /> : Icon ? <Icon className="h-5 w-5" /> : null}
         <code className="font-bold">{name}</code>
       </div>
       <div className="p-4">
@@ -557,7 +552,7 @@ function AuthEndpoints() {
               {expandedIdx === i && (
                 <div className="border-t border-[var(--border)] p-5 space-y-4">
                   <div className="flex items-center gap-2 text-xs">
-                    <Lock className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
+                    <BrandIcon name="encryption" className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
                     <span className="text-[var(--muted-foreground)]">Auth:</span>
                     <span className="font-medium text-[var(--foreground)]">{ep.auth}</span>
                   </div>
@@ -726,7 +721,7 @@ function ImplementationStatus() {
           {phases.map((p, i) => (
             <div key={i} className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
               <div className="flex items-center gap-3 mb-3">
-                <span className="text-xs font-bold uppercase tracking-wider text-[var(--dbx-red)]">{p.phase}</span>
+                <span className="text-xs font-bold uppercase tracking-wider text-[var(--dbx-lava-600)]">{p.phase}</span>
                 {i === 0 && p.status && (
                   <span className="text-xs font-medium px-2 py-0.5 rounded-full text-amber-500 bg-amber-50">
                     {p.status}
@@ -754,7 +749,7 @@ function ImplementationStatus() {
 function SectionHeader({ label, title, subtitle }: { label: string; title: string; subtitle: string }) {
   return (
     <div className="text-center mb-4">
-      <span className="inline-block text-xs font-bold uppercase tracking-widest text-[var(--dbx-red)] mb-2">{label}</span>
+      <span className="inline-block text-xs font-bold uppercase tracking-widest text-[var(--dbx-lava-600)] mb-2">{label}</span>
       <h2 className="text-3xl font-bold text-[var(--foreground)] mb-3">{title}</h2>
       <p className="text-[var(--muted-foreground)] max-w-2xl mx-auto">{subtitle}</p>
     </div>

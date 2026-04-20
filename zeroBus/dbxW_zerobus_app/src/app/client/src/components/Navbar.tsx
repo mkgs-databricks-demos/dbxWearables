@@ -1,17 +1,22 @@
 import { NavLink } from 'react-router';
-import {
-  Home,
-  FileText,
-  Activity,
-  Shield,
-} from 'lucide-react';
+import { Home } from 'lucide-react';
+import { BrandIcon } from '@/components/BrandIcon';
 import { ThemeToggle } from '@/components/ThemeToggle';
 
-const navItems = [
-  { to: '/', label: 'Overview', icon: Home, end: true },
-  { to: '/status', label: 'Health Status', icon: Activity },
-  { to: '/docs', label: 'API Docs', icon: FileText },
-  { to: '/security', label: 'Security', icon: Shield },
+type NavItem = {
+  to: string;
+  label: string;
+  end?: boolean;
+} & (
+  | { kind: 'lucide'; icon: React.ComponentType<{ className?: string }> }
+  | { kind: 'brand'; brandKey: import('@/icons').IconKey }
+);
+
+const navItems: NavItem[] = [
+  { to: '/', label: 'Overview', kind: 'lucide', icon: Home, end: true },
+  { to: '/status', label: 'Health Status', kind: 'brand', brandKey: 'healthcare-white' },
+  { to: '/docs', label: 'API Docs', kind: 'brand', brandKey: 'endpoint' },
+  { to: '/security', label: 'Security', kind: 'brand', brandKey: 'data-security' },
 ];
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
@@ -52,7 +57,10 @@ export function Navbar() {
                 end={item.end}
                 className={navLinkClass}
               >
-                <item.icon className="h-4 w-4" />
+                {item.kind === 'lucide'
+                ? <item.icon className="h-4 w-4" />
+                : <BrandIcon name={item.brandKey} className="h-4 w-4" />
+              }
                 {item.label}
               </NavLink>
             ))}

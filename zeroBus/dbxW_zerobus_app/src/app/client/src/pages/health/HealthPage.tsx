@@ -4,11 +4,10 @@ import {
   XCircle,
   AlertTriangle,
   RefreshCw,
-  Server,
-  Database,
-  Radio,
   Clock,
 } from 'lucide-react';
+import { BrandIcon } from '@/components/BrandIcon';
+import type { IconKey } from '@/icons';
 
 /* ═══════════════════════════════════════════════════════════════════
    HealthPage — System health dashboard
@@ -21,7 +20,7 @@ interface HealthCheck {
   id: string;
   name: string;
   description: string;
-  icon: typeof Server;
+  brandKey: IconKey;
   status: CheckStatus;
   message: string;
   details?: Record<string, unknown>;
@@ -72,7 +71,7 @@ export function HealthPage() {
         <button
           onClick={runChecks}
           disabled={isRefreshing}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg gradient-red text-white text-sm font-medium shadow-md shadow-[var(--dbx-red)]/20 hover:shadow-[var(--dbx-red)]/40 transition-all disabled:opacity-60"
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg gradient-red text-white text-sm font-medium shadow-md shadow-[var(--dbx-lava-600)]/20 hover:shadow-[var(--dbx-lava-600)]/40 transition-all disabled:opacity-60"
         >
           <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
           Refresh
@@ -171,13 +170,13 @@ function HealthCheckCard({ check }: { check: HealthCheck }) {
   }[check.status];
 
   const StatusIcon = statusConfig.icon;
-  const CheckIcon = check.icon;
+  // Brand icon from registry
 
   return (
     <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 flex items-start gap-5 hover:shadow-md transition-shadow">
       {/* Component icon */}
       <div className="w-12 h-12 rounded-xl bg-[var(--dbx-navy-800)] flex items-center justify-center flex-shrink-0">
-        <CheckIcon className="h-6 w-6 text-white" />
+        <BrandIcon name={check.brandKey} className="h-6 w-6" />
       </div>
 
       {/* Info */}
@@ -251,7 +250,7 @@ function initialChecks(): HealthCheck[] {
       id: 'api-health',
       name: 'API Health Endpoint',
       description: 'GET /api/v1/healthkit/health — Verifies the Express server and ZeroBus configuration.',
-      icon: Server,
+      brandKey: 'webhook',
       status: 'idle',
       message: 'Waiting to check...',
     },
@@ -259,7 +258,7 @@ function initialChecks(): HealthCheck[] {
       id: 'api-ingest',
       name: 'Ingest Endpoint',
       description: 'POST /api/v1/healthkit/ingest — Validates the ingestion endpoint is reachable.',
-      icon: Radio,
+      brandKey: 'streaming',
       status: 'idle',
       message: 'Waiting to check...',
     },
@@ -267,7 +266,7 @@ function initialChecks(): HealthCheck[] {
       id: 'lakebase',
       name: 'Lakebase Database',
       description: 'Postgres-compatible operational database for user auth and app state.',
-      icon: Database,
+      brandKey: 'delta-table',
       status: 'idle',
       message: 'Waiting to check...',
     },

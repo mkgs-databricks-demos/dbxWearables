@@ -1,18 +1,12 @@
 import {
-  Watch,
-  Smartphone,
-  Server,
-  Layers,
   ArrowRight,
-  Zap,
-  Radio,
-  BarChart3,
-  Heart,
   Footprints,
   Moon,
   Flame,
   Trash2,
 } from 'lucide-react';
+import { BrandIcon } from '@/components/BrandIcon';
+import { icon } from '@/icons';
 import { Link } from 'react-router';
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -52,7 +46,7 @@ function HeroSection() {
           {/* Text */}
           <div className="flex-1 text-center lg:text-left">
             <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/10 border border-white/20 text-sm mb-6">
-              <Zap className="h-4 w-4 text-[var(--dbx-lava-500)]" />
+              <BrandIcon name="spark-streaming" className="h-4 w-4 text-[var(--dbx-lava-500)]" />
               Powered by Databricks AppKit &amp; ZeroBus
             </div>
 
@@ -72,7 +66,7 @@ function HeroSection() {
             <div className="flex justify-center lg:justify-start gap-4 mt-10">
               <Link
                 to="/docs"
-                className="gradient-red text-white px-6 py-3 rounded-lg font-semibold text-sm shadow-lg shadow-[var(--dbx-red)]/30 hover:shadow-[var(--dbx-red)]/50 transition-all"
+                className="gradient-red text-white px-6 py-3 rounded-lg font-semibold text-sm shadow-lg shadow-[var(--dbx-lava-600)]/30 hover:shadow-[var(--dbx-lava-600)]/50 transition-all"
               >
                 View API Docs
               </Link>
@@ -141,7 +135,7 @@ function ArchitectureDiagramSection() {
 function ArchitectureSection() {
   const steps = [
     {
-      icon: Watch,
+      brandKey: 'iot',
       title: 'Apple HealthKit',
       subtitle: 'Data Source',
       desc: 'Apple Watch and Health app collect activity, workouts, sleep, and vitals. The iOS app reads data via anchored HealthKit queries.',
@@ -149,7 +143,7 @@ function ArchitectureSection() {
       image: null,
     },
     {
-      icon: Smartphone,
+      brandKey: 'smartphone',
       title: 'iOS App',
       subtitle: 'NDJSON Serializer',
       desc: 'SwiftUI app maps HKSamples to Codable structs, serializes as NDJSON, and POSTs batches with X-Record-Type headers.',
@@ -157,15 +151,15 @@ function ArchitectureSection() {
       image: null,
     },
     {
-      icon: Server,
+      brandKey: 'webhook',
       title: 'AppKit Gateway',
       subtitle: 'REST API',
       desc: 'Express server receives NDJSON payloads, validates headers, extracts user identity, and forwards to the ZeroBus SDK.',
-      color: 'bg-[var(--dbx-red)]',
+      color: 'bg-[var(--dbx-lava-600)]',
       image: '/images/databricks-symbol-color.svg',
     },
     {
-      icon: Radio,
+      brandKey: 'streaming',
       title: 'ZeroBus',
       subtitle: 'Stream Bridge',
       desc: 'Streams records into Unity Catalog bronze table with no external infrastructure. Decouples API from table writes.',
@@ -181,7 +175,7 @@ function ArchitectureSection() {
       image: '/images/unity-catalog-lockup-no-db-full-color-white.svg',
     },
     {
-      icon: Layers,
+      brandKey: 'delta-live-tables',
       title: 'SDP Pipeline',
       subtitle: 'Silver → Gold',
       desc: 'Spark Declarative Pipelines read bronze, clean and validate to silver, aggregate to gold for analytics.',
@@ -217,16 +211,16 @@ function ArchitectureSection() {
                   <div className={`${step.color} w-12 h-12 rounded-xl flex items-center justify-center mb-4 p-2`}>
                     <img src={step.image} alt="" className="h-7 w-7 brightness-0 invert" />
                   </div>
-                ) : step.icon ? (
+                ) : step.brandKey ? (
                   <div className={`${step.color} w-12 h-12 rounded-xl flex items-center justify-center mb-4`}>
-                    <step.icon className="h-6 w-6 text-white" />
+                    <BrandIcon name={step.brandKey} className="h-6 w-6" />
                   </div>
                 ) : null}
 
                 <h3 className="text-lg font-bold text-[var(--foreground)]">
                   {step.title}
                 </h3>
-                <p className="text-xs font-medium text-[var(--dbx-red)] uppercase tracking-wider mb-2">
+                <p className="text-xs font-medium text-[var(--dbx-lava-600)] uppercase tracking-wider mb-2">
                   {step.subtitle}
                 </p>
                 <p className="text-sm text-[var(--muted-foreground)] leading-relaxed">
@@ -236,7 +230,7 @@ function ArchitectureSection() {
                 {/* Arrow connector */}
                 {i < steps.length - 1 && (i + 1) % 3 !== 0 && (
                   <div className="hidden lg:block absolute -right-3 top-1/2 -translate-y-1/2 z-10">
-                    <ArrowRight className="h-5 w-5 text-[var(--dbx-red)]" />
+                    <ArrowRight className="h-5 w-5 text-[var(--dbx-lava-600)]" />
                   </div>
                 )}
               </div>
@@ -345,7 +339,7 @@ POST /api/v1/healthkit/ingest
 /* ── Record Types ─────────────────────────────────────────────────── */
 function RecordTypesSection() {
   const types = [
-    { type: 'samples', icon: Heart, desc: 'Quantity/category samples — step count, heart rate, distance, energy burned, VO2 max, SpO2, stand hours, and more', color: 'bg-red-500' },
+    { type: 'samples', brandKey: 'human' as const, desc: 'Quantity/category samples — step count, heart rate, distance, energy burned, VO2 max, SpO2, stand hours, and more', color: 'bg-red-500' },
     { type: 'workouts', icon: Footprints, desc: 'Workout sessions with activity type, duration, energy burned, and distance (70+ activity types supported)', color: 'bg-blue-500' },
     { type: 'sleep', icon: Moon, desc: 'Sleep sessions grouped from contiguous sleep stage samples — inBed, asleepCore, asleepDeep, asleepREM, awake', color: 'bg-indigo-500' },
     { type: 'activity_summaries', icon: Flame, desc: 'Daily Apple Activity ring data — active energy, exercise minutes, stand hours with goals', color: 'bg-orange-500' },
@@ -366,7 +360,10 @@ function RecordTypesSection() {
             <div key={t.type} className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 hover:shadow-md transition-shadow">
               <div className="flex items-center gap-3 mb-3">
                 <div className={`${t.color} w-10 h-10 rounded-lg flex items-center justify-center`}>
-                  <t.icon className="h-5 w-5 text-white" />
+                  {'brandKey' in t
+                    ? <BrandIcon name={t.brandKey} className="h-5 w-5" />
+                    : <t.icon className="h-5 w-5 text-white" />
+                  }
                 </div>
                 <code className="text-sm font-mono font-bold text-[var(--foreground)]">{t.type}</code>
               </div>
@@ -419,7 +416,7 @@ function MedallionSection() {
             <div key={i} className={`bg-[var(--card)] border-t-4 ${layer.border} border border-[var(--border)] rounded-xl p-6`}>
               <div className="flex items-center gap-3 mb-4">
                 <div className={`${layer.color} w-10 h-10 rounded-lg flex items-center justify-center`}>
-                  <BarChart3 className="h-5 w-5 text-white" />
+                  <BrandIcon name="analytics" className="h-5 w-5 text-white" />
                 </div>
                 <div>
                   <h3 className="font-bold text-[var(--foreground)]">{layer.name}</h3>
@@ -455,7 +452,7 @@ function SectionHeader({
 }) {
   return (
     <div className="text-center mb-4">
-      <span className="inline-block text-xs font-bold uppercase tracking-widest text-[var(--dbx-red)] mb-2">
+      <span className="inline-block text-xs font-bold uppercase tracking-widest text-[var(--dbx-lava-600)] mb-2">
         {label}
       </span>
       <h2 className="text-3xl font-bold text-[var(--foreground)] mb-3">{title}</h2>
