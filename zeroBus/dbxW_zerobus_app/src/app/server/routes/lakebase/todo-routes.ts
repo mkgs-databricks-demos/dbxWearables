@@ -45,6 +45,20 @@ export async function setupSampleLakebaseRoutes(appkit: AppKitWithLakebase) {
   }
 
   appkit.server.extend((app) => {
+    // ── Health probe — SELECT 1 connectivity check ──────────────────
+    app.get('/api/lakebase/health', async (_req, res) => {
+      try {
+        const start = Date.now();
+        await appkit.lakebase.query('SELECT 1 AS ok');
+        const latency = Date.now() - start;
+        res.json({ status: 'ok', latency_ms: latency });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('[lakebase] Health check failed:', message);
+        res.status(503).json({ status: 'error', message });
+      }
+    });
+
     app.get('/api/lakebase/todos', async (_req, res) => {
       try {
         const result = await appkit.lakebase.query(

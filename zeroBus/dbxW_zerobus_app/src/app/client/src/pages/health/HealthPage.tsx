@@ -9,10 +9,10 @@ import {
 import { BrandIcon } from '@/components/BrandIcon';
 import type { IconKey } from '@/icons';
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ═════════════════════════════════════════════════════════════════
    HealthPage — System health dashboard
    Checks: API health, Lakebase, ZeroBus stream, env configuration
-   ═══════════════════════════════════════════════════════════════════ */
+   ═════════════════════════════════════════════════════════════════ */
 
 type CheckStatus = 'idle' | 'loading' | 'ok' | 'warning' | 'error';
 
@@ -94,7 +94,7 @@ export function HealthPage() {
   );
 }
 
-/* ── Overall banner ───────────────────────────────────────────────── */
+/* ── Overall banner ───────────────────────────────────────────────────── */
 function OverallBanner({
   status,
   lastRefresh,
@@ -159,7 +159,7 @@ function OverallBanner({
   );
 }
 
-/* ── Individual health check card ─────────────────────────────────── */
+/* ── Individual health check card ─────────────────────────────────────── */
 function HealthCheckCard({ check }: { check: HealthCheck }) {
   const statusConfig = {
     ok: { icon: CheckCircle2, color: 'text-[var(--dbx-green-600)]', badge: 'bg-emerald-50 text-[var(--dbx-green-600)]', label: 'Healthy' },
@@ -216,7 +216,7 @@ function HealthCheckCard({ check }: { check: HealthCheck }) {
   );
 }
 
-/* ── Environment info section ─────────────────────────────────────── */
+/* ── Environment info section ─────────────────────────────────────────── */
 function EnvInfoSection() {
   return (
     <div className="mt-12 bg-[var(--dbx-navy-800)] rounded-xl p-6 text-white">
@@ -243,7 +243,7 @@ function EnvInfoSection() {
   );
 }
 
-/* ── Initial check definitions ────────────────────────────────────── */
+/* ── Initial check definitions ────────────────────────────────────────── */
 function initialChecks(): HealthCheck[] {
   return [
     {
@@ -265,7 +265,7 @@ function initialChecks(): HealthCheck[] {
     {
       id: 'lakebase',
       name: 'Lakebase Database',
-      description: 'Postgres-compatible operational database for user auth and app state.',
+      description: 'GET /api/lakebase/health — Postgres-compatible operational database for user auth and app state.',
       brandKey: 'delta-table',
       status: 'idle',
       message: 'Waiting to check...',
@@ -273,7 +273,7 @@ function initialChecks(): HealthCheck[] {
   ];
 }
 
-/* ── Run a single health check ────────────────────────────────────── */
+/* ── Run a single health check ────────────────────────────────────────── */
 async function runSingleCheck(check: HealthCheck): Promise<HealthCheck> {
   const start = performance.now();
 
@@ -337,14 +337,26 @@ async function runSingleCheck(check: HealthCheck): Promise<HealthCheck> {
       }
 
       case 'lakebase': {
-        // Try the lakebase todo endpoint as a connectivity check
-        const res = await fetch('/api/todos', { signal: AbortSignal.timeout(10000) });
+        // Dedicated Lakebase health probe — runs SELECT 1 on Postgres
+        const res = await fetch('/api/lakebase/health', { signal: AbortSignal.timeout(10000) });
         const latencyMs = Math.round(performance.now() - start);
         if (res.ok) {
+          const data = await res.json();
           return {
             ...check,
             status: 'ok',
             message: 'Lakebase connection healthy — Postgres queries succeeding',
+            details: { pg_latency_ms: `${data.latency_ms ?? '—'}ms` },
+            latencyMs,
+          };
+        }
+        // 503 = server returned a structured error from the health endpoint
+        if (res.status === 503) {
+          const data = await res.json().catch(() => ({}));
+          return {
+            ...check,
+            status: 'error',
+            message: `Lakebase connection failed: ${data.message || 'unknown error'}`,
             latencyMs,
           };
         }
