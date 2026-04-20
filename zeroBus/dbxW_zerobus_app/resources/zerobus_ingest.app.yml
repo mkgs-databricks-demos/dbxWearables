@@ -32,6 +32,16 @@
 #   zerobus_endpoint        — ZeroBus Ingest server endpoint
 #   target_table_name       — Fully qualified bronze table name
 #
+# Observability (Beta):
+#   App telemetry is enabled via telemetry_export_destinations. The
+#   platform auto-configures an OTLP collector at localhost:4314 and
+#   streams traces, logs, and metrics to Unity Catalog tables:
+#     ${var.catalog}.${var.schema}.${var.telemetry_table_prefix}_otel_logs
+#     ${var.catalog}.${var.schema}.${var.telemetry_table_prefix}_otel_traces
+#     ${var.catalog}.${var.schema}.${var.telemetry_table_prefix}_otel_metrics
+#   Custom instrumentation (server/otel.ts) adds Express/HTTP auto-tracing.
+#   See https://docs.databricks.com/aws/en/dev-tools/databricks-apps/observability/
+#
 # NOTE: Do NOT add npm registry proxies to env vars — Databricks Apps
 #       have their own package mirror. Proxies are for local dev only.
 
@@ -50,6 +60,32 @@ resources:
         stored in the infra bundle's secret scope.
 
       source_code_path: ../src/app
+
+      # -----------------------------------------------------------------------
+      # App Telemetry (Beta) — OpenTelemetry export to Unity Catalog
+      #
+      # Persists traces, logs, and metrics to three Delta tables in the
+      # wearables schema. The platform injects OTEL_EXPORTER_OTLP_ENDPOINT
+      # and related env vars automatically when this is configured.
+      #
+      # The Terraform provider schema for telemetry_export_destinations uses:
+      #   unity_catalog:
+      #     logs_table:    fully qualified table name
+      #     traces_table:  fully qualified table name
+      #     metrics_table: fully qualified table name
+      #
+      # Requirements (satisfied by infra bundle grants):
+      #   - Deploying user needs CAN MANAGE on catalog + schema
+      #   - CREATE TABLE on the schema (for first deployment)
+      #
+      # Recommendation: enable predictive optimization on the OTel tables
+      # after first deployment for better query performance.
+      # -----------------------------------------------------------------------
+      telemetry_export_destinations:
+        - unity_catalog:
+            logs_table: ${var.catalog}.${var.schema}.${var.telemetry_table_prefix}_otel_logs
+            traces_table: ${var.catalog}.${var.schema}.${var.telemetry_table_prefix}_otel_traces
+            metrics_table: ${var.catalog}.${var.schema}.${var.telemetry_table_prefix}_otel_metrics
 
       # -----------------------------------------------------------------------
       # App resources — grant the app's auto-provisioned SPN access to the

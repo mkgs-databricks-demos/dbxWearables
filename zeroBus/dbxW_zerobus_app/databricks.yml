@@ -82,6 +82,17 @@ variables:
       Full Lakebase Postgres database resource name.
       Format: projects/{project-id}/branches/{branch-id}/databases/{database-id}
 
+  # App Telemetry (Beta) — OpenTelemetry export to Unity Catalog.
+  # Tables created: {prefix}_otel_logs, {prefix}_otel_spans, {prefix}_otel_metrics
+  # Persists traces, logs, and metrics via the OTel protocol.
+  # See https://docs.databricks.com/aws/en/dev-tools/databricks-apps/observability/
+  telemetry_table_prefix:
+    description: >
+      Prefix for the OTel telemetry tables written to Unity Catalog.
+      Tables: {prefix}_otel_logs, {prefix}_otel_spans, {prefix}_otel_metrics.
+      Use a prefix to avoid collisions if multiple apps share the same schema.
+    default: dbxw_0bus_ingest
+
   # Tags — applied to all deployed resources via presets
   tags_project:
     default: dbxWearables ZeroBus
