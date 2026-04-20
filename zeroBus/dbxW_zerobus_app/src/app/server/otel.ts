@@ -59,20 +59,23 @@ try {
 }
 
 // ---------------------------------------------------------------------------
-// Graceful shutdown — flush pending telemetry before process exits
+// Graceful shutdown — flush pending telemetry on SIGTERM/SIGINT.
+//
+// NOTE: We do NOT call process.exit() here. AppKit's built-in shutdown
+// handler closes the HTTP server and Lakebase pool first; this handler
+// only flushes the OTel SDK. Calling process.exit() prematurely would
+// prevent AppKit from completing its own cleanup, causing the platform's
+// 15-second SIGTERM timeout error on redeployments.
 // ---------------------------------------------------------------------------
 
-async function shutdown(): Promise<void> {
-  console.log('[otel] Shutting down OpenTelemetry SDK...');
+async function flushTelemetry(): Promise<void> {
   try {
     await sdk.shutdown();
-    console.log('[otel] OpenTelemetry SDK shut down successfully');
+    console.log('[otel] OpenTelemetry SDK flushed and shut down');
   } catch (err) {
     console.error('[otel] OpenTelemetry SDK shutdown error:', err);
-  } finally {
-    process.exit(0);
   }
 }
 
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+process.on('SIGTERM', flushTelemetry);
+process.on('SIGINT', flushTelemetry);
