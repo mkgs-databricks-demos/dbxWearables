@@ -37,7 +37,7 @@
 #   platform auto-configures an OTLP collector at localhost:4314 and
 #   streams traces, logs, and metrics to Unity Catalog tables:
 #     ${var.catalog}.${var.schema}.${var.telemetry_table_prefix}_otel_logs
-#     ${var.catalog}.${var.schema}.${var.telemetry_table_prefix}_otel_spans
+#     ${var.catalog}.${var.schema}.${var.telemetry_table_prefix}_otel_traces
 #     ${var.catalog}.${var.schema}.${var.telemetry_table_prefix}_otel_metrics
 #   Custom instrumentation (server/otel.ts) adds Express/HTTP auto-tracing.
 #   See https://docs.databricks.com/aws/en/dev-tools/databricks-apps/observability/
@@ -68,6 +68,12 @@ resources:
       # wearables schema. The platform injects OTEL_EXPORTER_OTLP_ENDPOINT
       # and related env vars automatically when this is configured.
       #
+      # The Terraform provider schema for telemetry_export_destinations uses:
+      #   unity_catalog:
+      #     logs_table:    fully qualified table name
+      #     traces_table:  fully qualified table name
+      #     metrics_table: fully qualified table name
+      #
       # Requirements (satisfied by infra bundle grants):
       #   - Deploying user needs CAN MANAGE on catalog + schema
       #   - CREATE TABLE on the schema (for first deployment)
@@ -76,9 +82,10 @@ resources:
       # after first deployment for better query performance.
       # -----------------------------------------------------------------------
       telemetry_export_destinations:
-        - catalog_name: ${var.catalog}
-          schema_name: ${var.schema}
-          table_name_prefix: ${var.telemetry_table_prefix}
+        - unity_catalog:
+            logs_table: ${var.catalog}.${var.schema}.${var.telemetry_table_prefix}_otel_logs
+            traces_table: ${var.catalog}.${var.schema}.${var.telemetry_table_prefix}_otel_traces
+            metrics_table: ${var.catalog}.${var.schema}.${var.telemetry_table_prefix}_otel_metrics
 
       # -----------------------------------------------------------------------
       # App resources — grant the app's auto-provisioned SPN access to the
