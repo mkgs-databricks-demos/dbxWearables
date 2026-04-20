@@ -138,48 +138,48 @@ function ArchitectureSection() {
       title: 'Apple HealthKit',
       subtitle: 'Data Source',
       desc: 'Apple Watch and Health app collect activity, workouts, sleep, and vitals. The iOS app reads data via anchored HealthKit queries.',
-      color: 'bg-gray-800',
-      image: null,
+      logo: null as string | null,
+      logoDark: null as string | null,
     },
     {
       brandKey: 'smartphone' as const,
       title: 'iOS App',
       subtitle: 'NDJSON Serializer',
       desc: 'SwiftUI app maps HKSamples to Codable structs, serializes as NDJSON, and POSTs batches with X-Record-Type headers.',
-      color: 'bg-blue-600',
-      image: null,
+      logo: null as string | null,
+      logoDark: null as string | null,
     },
     {
-      brandKey: 'webhook' as const,
+      brandKey: null,
       title: 'AppKit Gateway',
       subtitle: 'REST API',
       desc: 'Express server receives NDJSON payloads, validates headers, extracts user identity, and forwards to the ZeroBus SDK.',
-      color: 'bg-[var(--dbx-lava-600)]',
-      image: '/images/apps-lockup-no-db-full-color-white-container.svg',
+      logo: '/images/apps-lockup-no-db-full-color.svg',
+      logoDark: '/images/apps-lockup-no-db-full-color-white-container.svg',
     },
     {
-      brandKey: 'streaming' as const,
+      brandKey: null,
       title: 'ZeroBus',
       subtitle: 'Stream Bridge',
       desc: 'Streams records into Unity Catalog bronze table with no external infrastructure. Decouples API from table writes.',
-      color: 'bg-[var(--dbx-lava-500)]',
-      image: '/images/data-streaming-icon-full-color-container.svg',
+      logo: '/images/data-streaming-icon-full-color-container.svg',
+      logoDark: '/images/data-streaming-icon-full-color-container.svg',
     },
     {
-      icon: null,
+      brandKey: null,
       title: 'Unity Catalog',
       subtitle: 'Bronze Table',
       desc: 'Raw NDJSON stored as VARIANT column. Full HTTP headers preserved. Schema-on-read for maximum flexibility.',
-      color: 'bg-[var(--dbx-green-600)]',
-      image: '/images/unity-catalog-lockup-no-db-full-color-white.svg',
+      logo: '/images/unity-catalog-lockup-no-db-full-color.svg',
+      logoDark: '/images/unity-catalog-lockup-no-db-full-color-white.svg',
     },
     {
-      brandKey: 'delta-live-tables' as const,
+      brandKey: null,
       title: 'SDP Pipeline',
       subtitle: 'Silver → Gold',
       desc: 'Spark Declarative Pipelines read bronze, clean and validate to silver, aggregate to gold for analytics.',
-      color: 'bg-purple-600',
-      image: '/images/apache-spark-logo-white-rgb.svg',
+      logo: '/images/apache-spark-logo-black-rgb.svg',
+      logoDark: '/images/apache-spark-logo-white-rgb.svg',
     },
   ];
 
@@ -201,20 +201,17 @@ function ArchitectureSection() {
                   {i + 1}
                 </div>
 
-                {/* Icon — official image or lucide icon */}
-                {step.image && step.title === 'Unity Catalog' ? (
-                  <div className="mb-4 h-12 flex items-center">
-                    <img src={step.image} alt={step.title} className="h-10" />
-                  </div>
-                ) : step.image ? (
-                  <div className={`${step.color} w-12 h-12 rounded-xl flex items-center justify-center mb-4 p-2`}>
-                    <img src={step.image} alt="" className="h-7 w-7 brightness-0 invert" />
-                  </div>
-                ) : step.brandKey ? (
-                  <div className={`${step.color} w-12 h-12 rounded-xl flex items-center justify-center mb-4`}>
-                    <BrandIcon name={step.brandKey as any} className="h-6 w-6" />
-                  </div>
-                ) : null}
+                {/* Logo — product lockup or brand icon (no box) */}
+                <div className="mb-4 h-10 flex items-center">
+                  {step.logo ? (
+                    <>
+                      <img src={step.logo} alt={step.title} className="h-8 block dark:hidden" />
+                      <img src={step.logoDark ?? step.logo} alt={step.title} className="h-8 hidden dark:block" />
+                    </>
+                  ) : step.brandKey ? (
+                    <BrandIcon name={step.brandKey as any} className="h-8 w-8 invert dark:invert-0" />
+                  ) : null}
+                </div>
 
                 <h3 className="text-lg font-bold text-[var(--foreground)]">
                   {step.title}
@@ -226,9 +223,9 @@ function ArchitectureSection() {
                   {step.desc}
                 </p>
 
-                {/* Arrow connector */}
+                {/* Arrow connector — centered in grid gap, aligned with logo row */}
                 {i < steps.length - 1 && (i + 1) % 3 !== 0 && (
-                  <div className="hidden lg:block absolute -right-3 top-1/2 -translate-y-1/2 z-10">
+                  <div className="hidden lg:flex items-center justify-center absolute left-full top-10 z-10 w-6 h-6">
                     <ArrowRight className="h-5 w-5 text-[var(--dbx-lava-600)]" />
                   </div>
                 )}
