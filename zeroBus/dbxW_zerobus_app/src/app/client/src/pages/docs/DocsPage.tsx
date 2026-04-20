@@ -55,7 +55,7 @@ export function DocsPage() {
 
 /* ── POST /api/v1/healthkit/ingest ────────────────────────────────── */
 function IngestEndpoint() {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [tryItOpen, setTryItOpen] = useState(false);
 
   return (

@@ -1,0 +1,7 @@
+# Databricks Brandfolder icon catalog export (915KB+)
+# Contains CDN URLs, metadata, and tags for 826 primary icons
+# Source: Brandfolder > Architecture Icons collection
+*.csv
+
+# Downloaded SVG icon files (fetched from CDN at build time)
+*.svg
