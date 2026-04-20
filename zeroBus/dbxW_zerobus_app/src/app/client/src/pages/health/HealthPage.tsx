@@ -94,7 +94,7 @@ export function HealthPage() {
   );
 }
 
-/* ── Overall banner ───────────────────────────────────────────────────── */
+/* ── Overall banner ─────────────────────────────────────────────────────────── */
 function OverallBanner({
   status,
   lastRefresh,
@@ -159,7 +159,7 @@ function OverallBanner({
   );
 }
 
-/* ── Individual health check card ─────────────────────────────────────── */
+/* ── Individual health check card ─────────────────────────────────────────── */
 function HealthCheckCard({ check }: { check: HealthCheck }) {
   const statusConfig = {
     ok: { icon: CheckCircle2, color: 'text-[var(--dbx-green-600)]', badge: 'bg-emerald-50 text-[var(--dbx-green-600)]', label: 'Healthy' },
@@ -197,12 +197,12 @@ function HealthCheckCard({ check }: { check: HealthCheck }) {
 
         {/* Details */}
         {check.details && Object.keys(check.details).length > 0 && (
-          <div className="mt-3 bg-[var(--muted)] rounded-lg p-3">
+          <div className="mt-3 bg-[var(--muted)] rounded-lg p-3 overflow-hidden">
             <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
               {Object.entries(check.details).map(([k, v]) => (
-                <div key={k} className="flex justify-between">
-                  <span className="text-[var(--muted-foreground)] font-mono">{k}</span>
-                  <span className="text-[var(--foreground)] font-medium">{String(v)}</span>
+                <div key={k} className="flex justify-between gap-3 min-w-0">
+                  <span className="text-[var(--muted-foreground)] font-mono flex-shrink-0">{k}</span>
+                  <span className="text-[var(--foreground)] font-medium truncate" title={String(v)}>{String(v)}</span>
                 </div>
               ))}
             </div>
@@ -216,7 +216,7 @@ function HealthCheckCard({ check }: { check: HealthCheck }) {
   );
 }
 
-/* ── Environment info section ─────────────────────────────────────────── */
+/* ── Environment info section ─────────────────────────────────────────────── */
 function EnvInfoSection() {
   return (
     <div className="mt-12 bg-[var(--dbx-navy-800)] rounded-xl p-6 text-white">
@@ -243,7 +243,7 @@ function EnvInfoSection() {
   );
 }
 
-/* ── Initial check definitions ────────────────────────────────────────── */
+/* ── Initial check definitions ────────────────────────────────────────────── */
 function initialChecks(): HealthCheck[] {
   return [
     {
@@ -273,7 +273,7 @@ function initialChecks(): HealthCheck[] {
   ];
 }
 
-/* ── Run a single health check ────────────────────────────────────────── */
+/* ── Run a single health check ────────────────────────────────────────────── */
 async function runSingleCheck(check: HealthCheck): Promise<HealthCheck> {
   const start = performance.now();
 
