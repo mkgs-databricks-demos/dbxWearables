@@ -7,6 +7,18 @@
 #   PGHOST, PGPORT, PGDATABASE, PGUSER, PGSSLMODE — from postgres resource
 #   DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET — app's own SPN identity
 #
+# Platform-injected (when telemetry_export_destinations is configured):
+#   OTEL_EXPORTER_OTLP_ENDPOINT  — http://localhost:4314
+#   OTEL_EXPORTER_OTLP_PROTOCOL  — grpc
+#   OTEL_RESOURCE_ATTRIBUTES     — workspace.id, app.name
+#   OTEL_SERVICE_NAME            — app name
+#   OTEL_BSP_MAX_QUEUE_SIZE      — 10000 (span queue)
+#   OTEL_BLRP_MAX_QUEUE_SIZE     — 10000 (log queue)
+#   OTEL_BSP_MAX_EXPORT_BATCH_SIZE  — 512
+#   OTEL_BLRP_MAX_EXPORT_BATCH_SIZE — 512
+#   OTEL_BSP_SCHEDULE_DELAY      — 1000ms
+#   OTEL_BLRP_SCHEDULE_DELAY     — 1000ms
+#
 # Custom env vars (from secret scope + postgres resource):
 #   LAKEBASE_ENDPOINT     — Lakebase endpoint path (from postgres resource)
 #   ZEROBUS_CLIENT_ID     — ZeroBus SPN application_id
@@ -17,6 +29,12 @@
 
 command: ['npm', 'run', 'start']
 env:
+  # OpenTelemetry — enable trace sampling for custom instrumentation.
+  # The platform injects the OTLP endpoint and batch config automatically;
+  # this variable controls whether the app's OTel SDK generates spans.
+  - name: OTEL_TRACES_SAMPLER
+    value: 'always_on'
+
   # Lakebase — endpoint path for AppKit lakebase plugin
   - name: LAKEBASE_ENDPOINT
     valueFrom: postgres
