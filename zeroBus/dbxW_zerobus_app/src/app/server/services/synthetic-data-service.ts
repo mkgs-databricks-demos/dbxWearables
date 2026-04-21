@@ -21,6 +21,7 @@ import {
   type GeneratedPayload,
   RECORD_TYPES,
   generatePayload,
+  AVG_RECORDS_PER_PAYLOAD,
 } from '../../shared/synthetic-healthkit.js';
 
 import { zeroBusService } from './zerobus-service.js';
@@ -272,7 +273,7 @@ class SyntheticDataService {
     for (const rt of RECORD_TYPES) {
       const count = counts[rt] ?? 0;
       if (count <= 0) continue;
-      const avgRecords = rt === 'samples' ? 3 : 1;
+      const avgRecords = AVG_RECORDS_PER_PAYLOAD[rt] ?? 1;
       estimatedTotalChunks += Math.ceil((count * avgRecords) / batchSize);
     }
 

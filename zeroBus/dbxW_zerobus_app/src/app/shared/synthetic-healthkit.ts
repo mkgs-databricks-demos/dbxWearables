@@ -7,9 +7,12 @@
 // (server-side synthetic-data-service for bulk load testing).
 //
 // Uses realistic statistical distributions:
-//   - Gaussian (Box-Muller) for heart rate, step count
+//   - Gaussian (Box-Muller) for heart rate, step count, SpO2, respiratory rate
 //   - Triangular for workout duration, sleep hours, activity calories
 //   - Uniform for time offsets, distance variance
+//
+// Sample payloads produce variable record counts (1-8, avg ~3.4) with
+// randomly selected HealthKit quantity types weighted by real-world frequency.
 //
 // Every call generates fresh UUIDs and timestamps anchored to Date.now().
 
@@ -135,59 +138,207 @@ export function sleepHours(): number {
   return Math.round(triangularRandom(5.5, 9.5, 7.5) * 100) / 100;
 }
 
+// ── Sample Type Registry ─────────────────────────────────────────────────
+//
+// Each entry defines how to generate a realistic HealthKit quantity sample.
+// Used by generateSamplesPayload() to produce variable-type, variable-count
+// payloads that mimic real iOS sync batches. Weights approximate real-world
+// frequency: heart rate and step count dominate, vitals are less common.
+
+interface SampleTypeConfig {
+  type: string;
+  unit: string;
+  value: () => number;
+  sources: string[];
+  /** If true, end_date = start_date + random duration; else point-in-time */
+  isDuration: boolean;
+  /** Duration range in minutes [min, max] — only when isDuration is true */
+  durationRange?: [number, number];
+  /** Optional metadata generator */
+  metadata?: () => Record<string, string> | null;
+  /** Relative weight for random selection (higher = more frequent) */
+  weight: number;
+}
+
+const SAMPLE_TYPES: SampleTypeConfig[] = [
+  {
+    type: 'HKQuantityTypeIdentifierHeartRate',
+    unit: 'count/min',
+    value: heartRate,
+    sources: ['Apple Watch'],
+    isDuration: false,
+    metadata: () => Math.random() > 0.4
+      ? { HKMetadataKeyHeartRateMotionContext: String(randomChoice([0, 1, 2])) }
+      : null,
+    weight: 3,
+  },
+  {
+    type: 'HKQuantityTypeIdentifierStepCount',
+    unit: 'count',
+    value: () => stepCount(0.5 + Math.random() * 1.5),
+    sources: ['iPhone', 'Apple Watch'],
+    isDuration: true,
+    durationRange: [15, 120],
+    weight: 2,
+  },
+  {
+    type: 'HKQuantityTypeIdentifierActiveEnergyBurned',
+    unit: 'kcal',
+    value: () => Math.round(triangularRandom(50, 400, 180) * 10) / 10,
+    sources: ['Apple Watch'],
+    isDuration: true,
+    durationRange: [15, 60],
+    weight: 2,
+  },
+  {
+    type: 'HKQuantityTypeIdentifierBasalEnergyBurned',
+    unit: 'kcal',
+    value: () => Math.round(triangularRandom(50, 90, 65) * 10) / 10,
+    sources: ['Apple Watch'],
+    isDuration: true,
+    durationRange: [55, 65],
+    weight: 1,
+  },
+  {
+    type: 'HKQuantityTypeIdentifierRestingHeartRate',
+    unit: 'count/min',
+    value: () => Math.round(gaussRandom(62, 8) * 10) / 10,
+    sources: ['Apple Watch'],
+    isDuration: false,
+    weight: 1,
+  },
+  {
+    type: 'HKQuantityTypeIdentifierHeartRateVariabilitySDNN',
+    unit: 'ms',
+    value: () => Math.max(5, Math.round(gaussRandom(45, 15) * 10) / 10),
+    sources: ['Apple Watch'],
+    isDuration: false,
+    weight: 1,
+  },
+  {
+    type: 'HKQuantityTypeIdentifierOxygenSaturation',
+    unit: '%',
+    value: () => Math.min(100, Math.max(90, Math.round(gaussRandom(97.5, 1.2) * 10) / 10)),
+    sources: ['Apple Watch'],
+    isDuration: false,
+    weight: 1,
+  },
+  {
+    type: 'HKQuantityTypeIdentifierRespiratoryRate',
+    unit: 'count/min',
+    value: () => Math.max(8, Math.round(gaussRandom(15, 2) * 10) / 10),
+    sources: ['Apple Watch'],
+    isDuration: false,
+    weight: 1,
+  },
+  {
+    type: 'HKQuantityTypeIdentifierDistanceWalkingRunning',
+    unit: 'm',
+    value: () => Math.max(10, Math.round(gaussRandom(800, 400))),
+    sources: ['iPhone', 'Apple Watch'],
+    isDuration: true,
+    durationRange: [5, 45],
+    weight: 2,
+  },
+  {
+    type: 'HKQuantityTypeIdentifierFlightsClimbed',
+    unit: 'count',
+    value: () => 1 + Math.floor(Math.random() * 8),
+    sources: ['iPhone', 'Apple Watch'],
+    isDuration: true,
+    durationRange: [2, 15],
+    weight: 1,
+  },
+];
+
+// Pre-compute weighted selection array for O(1) random picks
+const _weightedSampleTypes: SampleTypeConfig[] = [];
+for (const config of SAMPLE_TYPES) {
+  for (let i = 0; i < config.weight; i++) {
+    _weightedSampleTypes.push(config);
+  }
+}
+
+/** Pick a random sample type, weighted by real-world frequency */
+function randomSampleType(): SampleTypeConfig {
+  return randomChoice(_weightedSampleTypes);
+}
+
+/**
+ * Random sample count per payload: 1-8, skewed toward 2-4.
+ *
+ * Distribution: 1 (5%), 2 (20%), 3 (30%), 4 (25%), 5 (10%), 6-8 (10%)
+ * Weighted average: ~3.4 records per payload
+ */
+function randomSampleCount(): number {
+  const r = Math.random();
+  if (r < 0.05) return 1;
+  if (r < 0.25) return 2;
+  if (r < 0.55) return 3;
+  if (r < 0.80) return 4;
+  if (r < 0.90) return 5;
+  return 6 + Math.floor(Math.random() * 3);
+}
+
+/** Generate a single HealthKit quantity sample record */
+function generateSingleSample(config: SampleTypeConfig, now: Date): Record<string, unknown> {
+  const startTime = addHours(now, -(Math.random() * 6));
+  let endTime = startTime;
+
+  if (config.isDuration && config.durationRange) {
+    const [minMin, maxMin] = config.durationRange;
+    const durationMin = minMin + Math.random() * (maxMin - minMin);
+    endTime = addMinutes(startTime, durationMin);
+  }
+
+  return {
+    uuid: uuid(),
+    type: config.type,
+    value: config.value(),
+    unit: config.unit,
+    start_date: iso(startTime),
+    end_date: iso(endTime),
+    source_name: randomChoice(config.sources),
+    source_bundle_id: `com.apple.health.${uuid()}`,
+    metadata: config.metadata ? config.metadata() : null,
+  };
+}
+
 // ── Per-Record-Type Payload Generators ───────────────────────────────────
 
-/** Generate samples payload: 2 heart rate readings + 1 step count */
+/**
+ * Generate samples payload: variable count (1-8) of mixed HealthKit sample types.
+ *
+ * Mirrors real iOS sync behavior where each POST contains a variable number
+ * of samples collected since the last sync — some heart rate, some steps,
+ * some active energy, etc. The mix and count vary every call.
+ *
+ * Average: ~3.4 records per payload (weighted toward 2-4).
+ * Types: weighted random from 10 HealthKit quantity types.
+ */
 export function generateSamplesPayload(): GeneratedPayload {
   const now = new Date();
-  const hr1Time = addHours(now, -(1 + Math.random() * 3));
-  const hr2Time = addHours(now, -(0.1 + Math.random() * 0.9));
-  const stepsStart = addHours(now, -(2 + Math.random() * 3));
-  const stepsDurationHr = 0.5 + Math.random() * 1.5;
+  const count = randomSampleCount();
+  const records: Record<string, unknown>[] = [];
+  const typeCounts = new Map<string, number>();
 
-  const records = [
-    {
-      uuid: uuid(),
-      type: 'HKQuantityTypeIdentifierHeartRate',
-      value: heartRate(),
-      unit: 'count/min',
-      start_date: iso(hr1Time),
-      end_date: iso(hr1Time),
-      source_name: 'Apple Watch',
-      source_bundle_id: `com.apple.health.${uuid()}`,
-      metadata: {
-        HKMetadataKeyHeartRateMotionContext: String(randomChoice([0, 1, 2])),
-      },
-    },
-    {
-      uuid: uuid(),
-      type: 'HKQuantityTypeIdentifierHeartRate',
-      value: heartRate(),
-      unit: 'count/min',
-      start_date: iso(hr2Time),
-      end_date: iso(hr2Time),
-      source_name: 'Apple Watch',
-      source_bundle_id: `com.apple.health.${uuid()}`,
-      metadata: null,
-    },
-    {
-      uuid: uuid(),
-      type: 'HKQuantityTypeIdentifierStepCount',
-      value: stepCount(stepsDurationHr),
-      unit: 'count',
-      start_date: iso(stepsStart),
-      end_date: iso(addHours(stepsStart, stepsDurationHr)),
-      source_name: randomChoice(['iPhone', 'Apple Watch']),
-      source_bundle_id: 'com.apple.health',
-      metadata: null,
-    },
-  ];
+  for (let i = 0; i < count; i++) {
+    const config = randomSampleType();
+    records.push(generateSingleSample(config, now));
+    const shortType = config.type.replace('HKQuantityTypeIdentifier', '');
+    typeCounts.set(shortType, (typeCounts.get(shortType) || 0) + 1);
+  }
+
+  // Build description like "3 samples (2 HeartRate, 1 StepCount)"
+  const typeDesc = Array.from(typeCounts.entries())
+    .map(([t, n]) => `${n} ${t}`)
+    .join(', ');
 
   return {
     ndjson: records.map((r) => JSON.stringify(r)).join('\n'),
     records,
     recordCount: records.length,
-    description: '2 heart rate readings + 1 step count',
+    description: `${count} sample${count > 1 ? 's' : ''} (${typeDesc})`,
   };
 }
 
@@ -312,24 +463,27 @@ export function generateActivitySummariesPayload(): GeneratedPayload {
   };
 }
 
-/** Generate deletes payload: 1 soft-delete reference */
+/**
+ * Generate deletes payload: 1-3 soft-delete references.
+ *
+ * Distribution: 70% single, 18% double, 12% triple.
+ * Average: ~1.4 records per payload.
+ * References any of the 10 HealthKit sample types.
+ */
 export function generateDeletesPayload(): GeneratedPayload {
-  const records = [
-    {
-      uuid: uuid(),
-      sample_type: randomChoice([
-        'HKQuantityTypeIdentifierHeartRate',
-        'HKQuantityTypeIdentifierStepCount',
-        'HKQuantityTypeIdentifierActiveEnergyBurned',
-      ]),
-    },
-  ];
+  const count = Math.random() < 0.7 ? 1 : (Math.random() < 0.6 ? 2 : 3);
+
+  const deleteTypes = SAMPLE_TYPES.map((s) => s.type);
+  const records = Array.from({ length: count }, () => ({
+    uuid: uuid(),
+    sample_type: randomChoice(deleteTypes),
+  }));
 
   return {
     ndjson: records.map((d) => JSON.stringify(d)).join('\n'),
     records,
     recordCount: records.length,
-    description: '1 deletion record (soft-delete reference)',
+    description: `${count} deletion${count > 1 ? 's' : ''} (soft-delete reference${count > 1 ? 's' : ''})`,
   };
 }
 
@@ -391,3 +545,12 @@ export function generateAllTypes(
   }
   return result;
 }
+
+/** Average records per payload by type — used for progress estimation */
+export const AVG_RECORDS_PER_PAYLOAD: Record<RecordType, number> = {
+  samples: 3.4,
+  workouts: 1,
+  sleep: 1,
+  activity_summaries: 1,
+  deletes: 1.4,
+};
