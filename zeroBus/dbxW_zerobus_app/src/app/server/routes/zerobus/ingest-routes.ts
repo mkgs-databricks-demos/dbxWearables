@@ -2,7 +2,7 @@
 //
 // POST /api/v1/healthkit/ingest — receives NDJSON payloads from the iOS
 //   HealthKit demo app and streams each line to the wearables_zerobus
-//   bronze table via the ZeroBus REST API.
+//   bronze table via the ZeroBus TypeScript SDK (gRPC streaming).
 //
 // GET  /api/v1/healthkit/health — lightweight health/readiness check.
 //
@@ -67,8 +67,9 @@
 //   Body: one JSON object per line (NDJSON)
 //
 // Response contract (this endpoint → client):
-//   { status: "success"|"error", message: string, record_id?: string,
-//     records_ingested?: number, record_ids?: string[], duration_ms?: number }
+//   { status: "success"|"error", message: string, durable?: boolean,
+//     record_id?: string, records_ingested?: number, record_ids?: string[],
+//     duration_ms?: number }
 //   (compatible with iOS APIResponse.swift — unknown keys ignored)
 
 import express from 'express';
@@ -114,7 +115,7 @@ const HEADERS_TO_STRIP = new Set([
 /**
  * Extract ALL HTTP headers except security-sensitive ones.
  *
- * Blocklist approach: capture everything by default, strip only what’s
+ * Blocklist approach: capture everything by default, strip only what's
  * dangerous. This is more resilient than an allowlist — new headers from
  * any platform (iOS, Android, Fitbit, Garmin) are automatically captured
  * without requiring a server-side code change.
@@ -240,15 +241,15 @@ interface AppKitServer {
 // ── Route registration ─────────────────────────────────────────────────
 
 export async function setupZeroBusRoutes(appkit: AppKitServer) {
-  // Pre-flight: check env vars at startup (stream created lazily on first request)
+  // Pre-flight: check env vars at startup (stream pool created lazily on first request)
   const envCheck = zeroBusService.checkEnv();
   if (!envCheck.configured) {
     console.warn(
-      `[ZeroBus] Missing env vars (stream will fail on first request): ${envCheck.missing.join(', ')}`,
+      `[ZeroBus] Missing env vars (stream pool will fail on first request): ${envCheck.missing.join(', ')}`,
     );
   } else {
     console.log(
-      '[ZeroBus] All env vars present — stream will initialize on first ingest request',
+      '[ZeroBus] All env vars present — stream pool will initialize on first ingest request',
     );
   }
 
@@ -306,8 +307,8 @@ export async function setupZeroBusRoutes(appkit: AppKitServer) {
     // 3. Parse NDJSON into individual JSON objects
     // 4. Extract user identity from Bearer JWT (sub claim)
     // 5. Build WearablesRecord per line (UUID, timestamp, VARIANT columns)
-    // 6. Batch-ingest via ZeroBus REST API
-    // 7. Return success response with record IDs
+    // 6. Batch-ingest via ZeroBus SDK stream (offset-based durability)
+    // 7. Return success response with record IDs + durable confirmation
 
     app.post(
       '/api/v1/healthkit/ingest',
@@ -371,7 +372,7 @@ export async function setupZeroBusRoutes(appkit: AppKitServer) {
             zeroBusService.buildRecord(line, headers, recordType, sourcePlatform, userId),
           );
 
-          // — Ingest via ZeroBus REST API ───────────────────────
+          // — Ingest via ZeroBus SDK stream ─────────────────────
           const ingested = await zeroBusService.ingestRecords(records);
 
           const durationMs = Date.now() - startMs;
@@ -383,9 +384,11 @@ export async function setupZeroBusRoutes(appkit: AppKitServer) {
           // Compatible with iOS APIResponse.swift (unknown keys ignored
           // by Swift's Codable decoder). Single-record requests get a
           // top-level record_id for backwards compatibility.
+          // durable: true indicates offset-confirmed commit to the Delta table.
           res.status(200).json({
             status: 'success',
             message: `${ingested} record(s) ingested`,
+            durable: true,
             ...(records.length === 1 && { record_id: records[0].record_id }),
             records_ingested: ingested,
             record_ids: records.map((r) => r.record_id),
@@ -408,12 +411,14 @@ export async function setupZeroBusRoutes(appkit: AppKitServer) {
 
     app.get('/api/v1/healthkit/health', (_req: Request, res: Response) => {
       const envCheck = zeroBusService.checkEnv();
+      const pool = zeroBusService.poolStatus();
 
       res.json({
         status: 'ok',
         service: 'zerobus-healthkit-ingest',
         env_configured: envCheck.configured,
         target_table: process.env.ZEROBUS_TARGET_TABLE ?? '(not set)',
+        stream_pool: pool,
         ...(envCheck.missing.length > 0 && {
           missing_env_vars: envCheck.missing,
         }),
@@ -423,7 +428,7 @@ export async function setupZeroBusRoutes(appkit: AppKitServer) {
 
   // ── Graceful shutdown ────────────────────────────────────────────────
   process.on('SIGTERM', async () => {
-    console.log('[ZeroBus] SIGTERM received — closing stream');
+    console.log('[ZeroBus] SIGTERM received — closing stream pool');
     await zeroBusService.close();
   });
 }
