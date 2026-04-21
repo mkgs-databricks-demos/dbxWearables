@@ -81,6 +81,59 @@ const DRAIN_TIMEOUT_MS = 30_000;
 /** Polling interval (ms) when waiting for in-flight requests to complete. */
 const DRAIN_POLL_INTERVAL_MS = 250;
 
+
+// ── Auto-scale configuration ─────────────────────────────────────────
+
+/** Configuration for automatic stream pool scaling based on load. */
+export interface AutoScaleConfig {
+  /** Minimum pool size (default: 2). */
+  minSize: number;
+  /** Maximum pool size (default: 16). */
+  maxSize: number;
+  /** How often to check utilization, in ms (default: 3000). */
+  checkIntervalMs: number;
+  /** Minimum time between resize operations, in ms (default: 15000). */
+  cooldownMs: number;
+  /** Streams to add per scale-up event (default: 2). */
+  scaleUpStep: number;
+  /** Streams to remove per scale-down event (default: 1). */
+  scaleDownStep: number;
+}
+
+const AUTO_SCALE_DEFAULTS: AutoScaleConfig = {
+  minSize: 2,
+  maxSize: 16,
+  checkIntervalMs: 3_000,
+  cooldownMs: 15_000,
+  scaleUpStep: 2,
+  scaleDownStep: 1,
+};
+
+
+/** Recorded each time the stream pool is resized (auto or manual). */
+export interface ResizeEvent {
+  /** ISO 8601 timestamp */
+  timestamp: string;
+  /** What triggered the resize */
+  trigger: 'auto-scale-up' | 'auto-scale-down' | 'manual' | 'initial';
+  /** Pool size before */
+  oldSize: number;
+  /** Pool size after */
+  newSize: number;
+  /** Duration of the resize operation in ms */
+  durationMs: number;
+  /** Peak in-flight at the time of the decision (auto-scale only) */
+  peakInflight?: number;
+  /** Consecutive idle checks at the time (auto-scale down only) */
+  idleChecks?: number;
+}
+
+/** Maximum number of resize events to retain in the ring buffer. */
+const MAX_RESIZE_HISTORY = 50;
+
+/** Number of consecutive idle checks before scaling down. */
+const IDLE_CHECKS_BEFORE_SCALE_DOWN = 3;
+
 // ── SDK stream interface ─────────────────────────────────────────────────
 //
 // Minimal interface matching the stream returned by ZerobusSdk.createStream().
@@ -102,6 +155,12 @@ class ZeroBusService {
   private poolSize: number;
   private initPromise: Promise<void> | null = null;
 
+  // Stored after initialization so resize() can open new streams
+  // without re-reading env vars.
+  private targetTable = '';
+  private clientId = '';
+  private clientSecret = '';
+
   // ── In-flight tracking for graceful shutdown ──────────────────────
   //
   // inflight counts the number of ingestRecords() calls currently
@@ -112,6 +171,18 @@ class ZeroBusService {
 
   private inflight = 0;
   private draining = false;
+
+  // ── Auto-scale state ──────────────────────────────────────────
+  private autoScaleEnabled = false;
+  private autoScaleConfig: AutoScaleConfig = { ...AUTO_SCALE_DEFAULTS };
+  private autoScaleTimer: ReturnType<typeof setInterval> | null = null;
+  private lastAutoScaleTime = 0;
+  private peakInflight = 0;
+  private idleChecks = 0;
+  private resizeHistory: ResizeEvent[] = [];
+  private _lastResizeTrigger: ResizeEvent['trigger'] | null = null;
+  private _lastResizePeak?: number;
+  private _lastResizeIdle?: number;
 
   constructor(poolSize?: number) {
     this.poolSize = poolSize ??
@@ -155,6 +226,11 @@ class ZeroBusService {
     const clientId = process.env.ZEROBUS_CLIENT_ID!;
     const clientSecret = process.env.ZEROBUS_CLIENT_SECRET!;
 
+    // Store for resize() — avoid re-reading env vars
+    this.targetTable = targetTable;
+    this.clientId = clientId;
+    this.clientSecret = clientSecret;
+
     console.log(
       `[ZeroBus] Initializing SDK stream pool (size: ${this.poolSize}, table: ${targetTable})`,
     );
@@ -176,6 +252,13 @@ class ZeroBusService {
 
     this.streams = await Promise.all(streamPromises);
     console.log(`[ZeroBus] Stream pool ready (${this.streams.length} streams)`);
+    this.recordResizeEvent({
+      timestamp: new Date().toISOString(),
+      trigger: 'initial',
+      oldSize: 0,
+      newSize: this.streams.length,
+      durationMs: 0,
+    });
   }
 
   /**
@@ -189,6 +272,131 @@ class ZeroBusService {
     const stream = this.streams[this.streamIndex];
     this.streamIndex = (this.streamIndex + 1) % this.streams.length;
     return stream;
+  }
+
+
+
+  /** Record a resize event in the ring buffer. */
+  private recordResizeEvent(event: ResizeEvent): void {
+    this.resizeHistory.push(event);
+    if (this.resizeHistory.length > MAX_RESIZE_HISTORY) {
+      this.resizeHistory.shift();
+    }
+  }
+
+  // ── Dynamic pool resize ──────────────────────────────────────────────
+
+  /**
+   * Resize the gRPC stream pool at runtime without restarting the app.
+   *
+   * - **Scale up**: opens additional streams and appends them to the pool.
+   *   No disruption — existing in-flight requests continue on their streams.
+   * - **Scale down**: waits for in-flight requests to drain (up to 10s),
+   *   then closes excess streams from the tail and resets the round-robin
+   *   index if needed. Closed streams flush any SDK-queued records.
+   *
+   * If the pool hasn't been initialized yet (no ingest request has been
+   * made), this just updates the target size for the next initialization.
+   *
+   * @param newSize - Desired pool size (1–32).
+   * @returns Previous and new pool sizes with timing.
+   */
+  async resize(
+    newSize: number,
+  ): Promise<{ oldSize: number; newSize: number; durationMs: number }> {
+    if (newSize < 1 || newSize > 32) {
+      throw new Error(`Pool size must be between 1 and 32, got ${newSize}`);
+    }
+
+    const start = performance.now();
+    const oldSize = this.streams.length;
+
+    // Pool not yet initialized — just update the target
+    if (oldSize === 0 || !this.sdk) {
+      this.poolSize = newSize;
+      console.log(
+        `[ZeroBus] Pool size set to ${newSize} (will apply on next initialization)`,
+      );
+      return { oldSize: 0, newSize, durationMs: 0 };
+    }
+
+    if (newSize === oldSize) {
+      return { oldSize, newSize, durationMs: 0 };
+    }
+
+    if (newSize > oldSize) {
+      // ── Scale UP — open additional streams ──────────────────────
+      console.log(`[ZeroBus] Scaling pool UP: ${oldSize} → ${newSize}`);
+
+      const additional = newSize - oldSize;
+      const newStreams = await Promise.all(
+        Array.from({ length: additional }, (_, i) =>
+          this.sdk!.createStream(
+            { tableName: this.targetTable },
+            this.clientId,
+            this.clientSecret,
+            { recordType: RecordType.Json },
+          ).then((stream: IngestStream) => {
+            console.log(
+              `[ZeroBus] Stream ${oldSize + i + 1}/${newSize} opened (resize)`,
+            );
+            return stream;
+          }),
+        ),
+      );
+      this.streams.push(...newStreams);
+    } else {
+      // ── Scale DOWN — drain in-flight, then close excess ─────────
+      console.log(
+        `[ZeroBus] Scaling pool DOWN: ${oldSize} → ${newSize} (draining in-flight...)`,
+      );
+
+      // Wait for in-flight requests to complete — they may hold
+      // references to streams we're about to close.
+      const drainStart = Date.now();
+      while (this.inflight > 0 && Date.now() - drainStart < 10_000) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      if (this.inflight > 0) {
+        console.warn(
+          `[ZeroBus] ${this.inflight} request(s) still in-flight after 10s drain — proceeding with resize`,
+        );
+      }
+
+      // Remove excess streams from the tail of the pool
+      const excess = this.streams.splice(newSize);
+
+      // Reset round-robin index if it's beyond the new pool boundary
+      if (this.streamIndex >= newSize) {
+        this.streamIndex = 0;
+      }
+
+      // Close removed streams (flushes any SDK-queued records)
+      await Promise.allSettled(excess.map((s) => s.close()));
+      console.log(`[ZeroBus] Closed ${excess.length} excess stream(s)`);
+    }
+
+    this.poolSize = newSize;
+    const durationMs = Math.round(performance.now() - start);
+    console.log(
+      `[ZeroBus] Pool resized: ${oldSize} → ${newSize} (${durationMs}ms)`,
+    );
+
+    // Record in history (trigger is set by caller via _lastResizeTrigger)
+    this.recordResizeEvent({
+      timestamp: new Date().toISOString(),
+      trigger: this._lastResizeTrigger ?? 'manual',
+      oldSize,
+      newSize,
+      durationMs,
+      peakInflight: this._lastResizePeak,
+      idleChecks: this._lastResizeIdle,
+    });
+    this._lastResizeTrigger = null;
+    this._lastResizePeak = undefined;
+    this._lastResizeIdle = undefined;
+
+    return { oldSize, newSize, durationMs };
   }
 
   // ── Record builder ───────────────────────────────────────────────────
@@ -259,6 +467,7 @@ class ZeroBusService {
 
     // Track in-flight requests for graceful shutdown
     this.inflight++;
+    if (this.inflight > this.peakInflight) this.peakInflight = this.inflight;
     try {
       // Write all records to the stream — ingestRecordOffset() queues each
       // record and returns quickly. The Rust runtime sends them efficiently
@@ -277,6 +486,131 @@ class ZeroBusService {
       return records.length;
     } finally {
       this.inflight--;
+    }
+  }
+
+
+  // ── Auto-scale management ────────────────────────────────────────────
+
+  /**
+   * Enable automatic pool scaling based on load.
+   *
+   * A background interval checks stream utilization every `checkIntervalMs`:
+   *   - **Scale up**: when peak in-flight ≥ stream count (all streams
+   *     saturated), adds `scaleUpStep` streams up to `maxSize`.
+   *   - **Scale down**: after `IDLE_CHECKS_BEFORE_SCALE_DOWN` consecutive
+   *     checks with 0 in-flight, removes `scaleDownStep` streams down
+   *     to `minSize`.
+   *   - A `cooldownMs` guard prevents resize thrashing.
+   */
+  enableAutoScale(config: Partial<AutoScaleConfig> = {}): AutoScaleConfig {
+    this.autoScaleConfig = { ...AUTO_SCALE_DEFAULTS, ...config };
+    this.autoScaleEnabled = true;
+    this.lastAutoScaleTime = 0;
+    this.peakInflight = 0;
+    this.idleChecks = 0;
+
+    // Clear any existing timer before starting a new one
+    if (this.autoScaleTimer) clearInterval(this.autoScaleTimer);
+    this.autoScaleTimer = setInterval(
+      () => void this.checkAutoScale(),
+      this.autoScaleConfig.checkIntervalMs,
+    );
+
+    console.log(
+      `[ZeroBus] Auto-scale enabled (min: ${this.autoScaleConfig.minSize}, max: ${this.autoScaleConfig.maxSize}, ` +
+        `interval: ${this.autoScaleConfig.checkIntervalMs}ms, cooldown: ${this.autoScaleConfig.cooldownMs}ms)`,
+    );
+    return { ...this.autoScaleConfig };
+  }
+
+  /** Disable auto-scaling. The pool stays at its current size. */
+  disableAutoScale(): void {
+    if (this.autoScaleTimer) {
+      clearInterval(this.autoScaleTimer);
+      this.autoScaleTimer = null;
+    }
+    this.autoScaleEnabled = false;
+    console.log('[ZeroBus] Auto-scale disabled');
+  }
+
+  /** Returns current auto-scale configuration, state, and resize history. */
+  autoScaleStatus(): {
+    enabled: boolean;
+    config: AutoScaleConfig;
+    peak_inflight: number;
+    idle_checks: number;
+    history: ResizeEvent[];
+  } {
+    return {
+      enabled: this.autoScaleEnabled,
+      config: { ...this.autoScaleConfig },
+      peak_inflight: this.peakInflight,
+      idle_checks: this.idleChecks,
+      history: [...this.resizeHistory],
+    };
+  }
+
+  /**
+   * Background check — called by the auto-scale interval timer.
+   * Not meant to be called directly.
+   */
+  private async checkAutoScale(): Promise<void> {
+    if (!this.autoScaleEnabled || this.streams.length === 0 || this.draining) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - this.lastAutoScaleTime < this.autoScaleConfig.cooldownMs) return;
+
+    const currentInflight = this.inflight;
+    const peak = Math.max(this.peakInflight, currentInflight);
+    this.peakInflight = currentInflight; // reset for next interval
+
+    const streamCount = this.streams.length;
+    const config = this.autoScaleConfig;
+
+    if (peak >= streamCount && streamCount < config.maxSize) {
+      // All streams saturated — scale up
+      const newSize = Math.min(
+        streamCount + config.scaleUpStep,
+        config.maxSize,
+      );
+      console.log(
+        `[ZeroBus/AutoScale] Peak ${peak} in-flight ≥ ${streamCount} streams — scaling UP: ${streamCount} → ${newSize}`,
+      );
+      try {
+        this._lastResizeTrigger = 'auto-scale-up';
+        this._lastResizePeak = peak;
+        await this.resize(newSize);
+        this.lastAutoScaleTime = now;
+      } catch (err) {
+        console.error('[ZeroBus/AutoScale] Scale-up failed:', err);
+      }
+      this.idleChecks = 0;
+    } else if (currentInflight === 0) {
+      this.idleChecks++;
+      if (
+        this.idleChecks >= IDLE_CHECKS_BEFORE_SCALE_DOWN &&
+        streamCount > config.minSize
+      ) {
+        const newSize = Math.max(
+          streamCount - config.scaleDownStep,
+          config.minSize,
+        );
+        console.log(
+          `[ZeroBus/AutoScale] Idle for ${this.idleChecks} checks — scaling DOWN: ${streamCount} → ${newSize}`,
+        );
+        try {
+          await this.resize(newSize);
+          this.lastAutoScaleTime = now;
+        } catch (err) {
+          console.error('[ZeroBus/AutoScale] Scale-down failed:', err);
+        }
+        this.idleChecks = 0;
+      }
+    } else {
+      this.idleChecks = 0;
     }
   }
 
@@ -302,6 +636,11 @@ class ZeroBusService {
       initialized: this.streams.length > 0,
       inflight_requests: this.inflight,
       draining: this.draining,
+      auto_scale: {
+        enabled: this.autoScaleEnabled,
+        min_size: this.autoScaleConfig.minSize,
+        max_size: this.autoScaleConfig.maxSize,
+      },
     };
   }
 
@@ -324,6 +663,7 @@ class ZeroBusService {
    */
   async close(): Promise<void> {
     this.draining = true;
+    this.disableAutoScale();
 
     // ── Step 1: Drain in-flight requests ────────────────────────────
     if (this.inflight > 0) {

@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef } from 'react';
-import { Play, Square, RefreshCw, Zap, Clock, BarChart3 } from 'lucide-react';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { Play, Square, RefreshCw, Zap, Clock, BarChart3, Layers, ArrowUpCircle, ArrowDownCircle, Settings2, Sparkles } from 'lucide-react';
 import { BrandIcon } from '@/components/BrandIcon';
 import { type RecordType, RECORD_TYPES } from '@shared/synthetic-healthkit';
 
@@ -24,6 +24,31 @@ interface TestState {
   recordsPerSec: number;
   perType: Map<RecordType, { records: number; durationMs: number }>;
   error?: string;
+}
+
+
+interface PoolStatus {
+  pool_size: number;
+  active_streams: number;
+  initialized: boolean;
+  inflight_requests: number;
+  draining: boolean;
+  auto_scale: {
+    enabled: boolean;
+    min_size: number;
+    max_size: number;
+  };
+}
+
+
+interface ResizeEvent {
+  timestamp: string;
+  trigger: 'auto-scale-up' | 'auto-scale-down' | 'manual' | 'initial';
+  oldSize: number;
+  newSize: number;
+  durationMs: number;
+  peakInflight?: number;
+  idleChecks?: number;
 }
 
 // ── Presets ───────────────────────────────────────────────────────────
@@ -104,10 +129,105 @@ export function LoadTestPage() {
     setActivePreset(index);
   }, []);
 
+
+  // ── Stream pool status ──────────────────────────────────────────
+  const [pool, setPool] = useState<PoolStatus | null>(null);
+  const [poolTarget, setPoolTarget] = useState(4);
+  const [poolResizing, setPoolResizing] = useState(false);
+  const [poolError, setPoolError] = useState('');
+  const [autoScaleEnabled, setAutoScaleEnabled] = useState(false);
+  const [autoScaleMin, setAutoScaleMin] = useState(2);
+  const [autoScaleMax, setAutoScaleMax] = useState(16);
+  const [autoScaleToggling, setAutoScaleToggling] = useState(false);
+  const [resizeHistory, setResizeHistory] = useState<ResizeEvent[]>([]);
+
+  const fetchPoolStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/v1/testing/pool-status');
+      const data = await res.json();
+      if (data.status === 'ok') {
+        setPool(data);
+        setPoolTarget(data.pool_size);
+        if (data.auto_scale) {
+          setAutoScaleEnabled(data.auto_scale.enabled);
+          if (data.auto_scale.enabled) {
+            setAutoScaleMin(data.auto_scale.min_size);
+            setAutoScaleMax(data.auto_scale.max_size);
+          }
+        }
+        if (data.history) {
+          setResizeHistory(data.history);
+        }
+      }
+    } catch {
+      // Pool status not critical — ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPoolStatus();
+  }, [fetchPoolStatus]);
+
+  const resizePool = useCallback(async () => {
+    setPoolResizing(true);
+    setPoolError('');
+    try {
+      const res = await fetch('/api/v1/testing/pool-resize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ poolSize: poolTarget }),
+      });
+      const data = await res.json();
+      if (data.status !== 'success') {
+        throw new Error(data.message || 'Resize failed');
+      }
+      await fetchPoolStatus();
+    } catch (err) {
+      setPoolError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPoolResizing(false);
+    }
+  }, [poolTarget, fetchPoolStatus]);
+
+
+  const toggleAutoScale = useCallback(async (enable: boolean) => {
+    setAutoScaleToggling(true);
+    setPoolError('');
+    try {
+      const res = await fetch('/api/v1/testing/pool-autoscale', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          enable
+            ? { enabled: true, minSize: autoScaleMin, maxSize: autoScaleMax }
+            : { enabled: false },
+        ),
+      });
+      const data = await res.json();
+      if (data.status !== 'success') {
+        throw new Error(data.message || 'Auto-scale toggle failed');
+      }
+      setAutoScaleEnabled(enable);
+      await fetchPoolStatus();
+    } catch (err) {
+      setPoolError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAutoScaleToggling(false);
+    }
+  }, [autoScaleMin, autoScaleMax, fetchPoolStatus]);
+
   const updateCount = useCallback((rt: RecordType, value: number) => {
     setCounts((prev) => ({ ...prev, [rt]: Math.max(0, value) }));
     setActivePreset(-1);
   }, []);
+
+
+  // Poll pool status while auto-scale is active and a test is running
+  useEffect(() => {
+    if (!autoScaleEnabled || state.phase !== 'running') return;
+    const interval = setInterval(fetchPoolStatus, 3000);
+    return () => clearInterval(interval);
+  }, [autoScaleEnabled, state.phase, fetchPoolStatus]);
 
   // ── SSE streaming execution ─────────────────────────────────────
   //
@@ -208,6 +328,8 @@ export function LoadTestPage() {
               recordsPerSec: parsed.recordsPerSec,
               perType: typeMap,
             });
+            // Refresh pool status after test completes
+            fetchPoolStatus();
           } else if (eventType === 'error') {
             setState((prev) => ({
               ...prev,
@@ -312,6 +434,117 @@ export function LoadTestPage() {
                 {formatNumber(totalPayloads(counts))}
               </span>
             </div>
+          </div>
+
+
+          {/* Stream pool */}
+          <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-bold text-sm text-[var(--foreground)]">Stream Pool</h3>
+              {pool && (
+                <span className={`text-xs font-mono px-2 py-0.5 rounded-full ${
+                  pool.initialized
+                    ? 'bg-[var(--dbx-green-600)]/10 text-[var(--dbx-green-600)]'
+                    : 'bg-[var(--muted)] text-[var(--muted-foreground)]'
+                }`}>
+                  {pool.initialized ? `${pool.active_streams} stream${pool.active_streams !== 1 ? 's' : ''} active` : 'not initialized'}
+                </span>
+              )}
+            </div>
+
+            {/* Auto-scale toggle */}
+            <div className="flex items-center justify-between mb-3 pb-3 border-b border-[var(--border)]">
+              <div>
+                <span className="text-xs font-medium text-[var(--foreground)]">Auto-scale</span>
+                <span className="text-xs text-[var(--muted-foreground)] ml-1.5">
+                  {autoScaleEnabled ? `${autoScaleMin}–${autoScaleMax}` : 'off'}
+                </span>
+              </div>
+              <button
+                onClick={() => toggleAutoScale(!autoScaleEnabled)}
+                disabled={autoScaleToggling}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  autoScaleEnabled
+                    ? 'bg-[var(--dbx-green-600)]'
+                    : 'bg-[var(--muted)] border border-[var(--border)]'
+                } ${autoScaleToggling ? 'opacity-50' : ''}`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${
+                    autoScaleEnabled ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Auto-scale config (shown when enabled) */}
+            {autoScaleEnabled && (
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                <div>
+                  <label className="block text-xs text-[var(--muted-foreground)] mb-1">Min</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={autoScaleMax - 1}
+                    value={autoScaleMin}
+                    onChange={(e) => setAutoScaleMin(Math.max(1, parseInt(e.target.value) || 1))}
+                    onBlur={() => { if (autoScaleEnabled) toggleAutoScale(true); }}
+                    className="w-full bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm font-mono text-[var(--foreground)]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[var(--muted-foreground)] mb-1">Max</label>
+                  <input
+                    type="number"
+                    min={autoScaleMin + 1}
+                    max={32}
+                    value={autoScaleMax}
+                    onChange={(e) => setAutoScaleMax(Math.min(32, parseInt(e.target.value) || 16))}
+                    onBlur={() => { if (autoScaleEnabled) toggleAutoScale(true); }}
+                    className="w-full bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm font-mono text-[var(--foreground)]"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Manual resize (disabled when auto-scale is active) */}
+            {!autoScaleEnabled && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={32}
+                  value={poolTarget}
+                  onChange={(e) => setPoolTarget(Math.max(1, Math.min(32, parseInt(e.target.value) || 1)))}
+                  disabled={poolResizing || state.phase === 'running'}
+                  className="flex-1 bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm font-mono text-[var(--foreground)] disabled:opacity-50"
+                />
+                <button
+                  onClick={resizePool}
+                  disabled={poolResizing || state.phase === 'running' || poolTarget === (pool?.pool_size ?? 0)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-[var(--border)] text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors disabled:opacity-40"
+                >
+                  <Layers className={`h-3.5 w-3.5 ${poolResizing ? 'animate-spin' : ''}`} />
+                  {poolResizing ? 'Resizing...' : 'Resize'}
+                </button>
+              </div>
+            )}
+
+            {poolError && (
+              <p className="text-xs text-red-500 mt-2">{poolError}</p>
+            )}
+
+            <p className="text-xs text-[var(--muted-foreground)] mt-3">
+              {autoScaleEnabled
+                ? 'Pool scales automatically: adds streams under load, removes them when idle.'
+                : 'Concurrent gRPC streams to ZeroBus. More streams = higher throughput.'}
+            </p>
+
+            {pool && pool.inflight_requests > 0 && (
+              <p className="text-xs text-[var(--dbx-lava-500)] mt-1 font-mono">
+                {pool.inflight_requests} request{pool.inflight_requests !== 1 ? 's' : ''} in-flight
+              </p>
+            )}
           </div>
 
           {/* Advanced settings */}
@@ -474,6 +707,79 @@ export function LoadTestPage() {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+
+
+          {/* Auto-scale event log */}
+          {resizeHistory.length > 0 && (
+            <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl overflow-hidden">
+              <div className="px-5 py-3 bg-[var(--muted)] border-b border-[var(--border)] flex items-center justify-between">
+                <h3 className="font-bold text-sm text-[var(--foreground)]">Pool Resize History</h3>
+                <span className="text-xs font-mono text-[var(--muted-foreground)]">
+                  {resizeHistory.length} event{resizeHistory.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+              <div className="max-h-56 overflow-y-auto divide-y divide-[var(--border)]">
+                {[...resizeHistory].reverse().map((evt, i) => (
+                  <div key={i} className="flex items-center gap-3 px-5 py-2.5 hover:bg-[var(--muted)]/30">
+                    {/* Icon */}
+                    <div className={`flex-shrink-0 ${
+                      evt.trigger === 'auto-scale-up' ? 'text-[var(--dbx-green-600)]' :
+                      evt.trigger === 'auto-scale-down' ? 'text-blue-500' :
+                      evt.trigger === 'initial' ? 'text-[var(--muted-foreground)]' :
+                      'text-[var(--dbx-lava-600)]'
+                    }`}>
+                      {evt.trigger === 'auto-scale-up' && <ArrowUpCircle className="h-4 w-4" />}
+                      {evt.trigger === 'auto-scale-down' && <ArrowDownCircle className="h-4 w-4" />}
+                      {evt.trigger === 'manual' && <Settings2 className="h-4 w-4" />}
+                      {evt.trigger === 'initial' && <Sparkles className="h-4 w-4" />}
+                    </div>
+
+                    {/* Details */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-[var(--foreground)]">
+                          {evt.oldSize} → {evt.newSize}
+                        </span>
+                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                          evt.trigger.startsWith('auto') 
+                            ? 'bg-[var(--dbx-green-600)]/10 text-[var(--dbx-green-600)]' 
+                            : evt.trigger === 'manual'
+                              ? 'bg-[var(--dbx-lava-600)]/10 text-[var(--dbx-lava-600)]'
+                              : 'bg-[var(--muted)] text-[var(--muted-foreground)]'
+                        }`}>
+                          {evt.trigger === 'auto-scale-up' ? 'auto ↑' :
+                           evt.trigger === 'auto-scale-down' ? 'auto ↓' :
+                           evt.trigger}
+                        </span>
+                        {evt.peakInflight !== undefined && (
+                          <span className="text-[10px] text-[var(--muted-foreground)]">
+                            peak: {evt.peakInflight}
+                          </span>
+                        )}
+                        {evt.idleChecks !== undefined && (
+                          <span className="text-[10px] text-[var(--muted-foreground)]">
+                            idle: {evt.idleChecks}×
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Timestamp + duration */}
+                    <div className="flex-shrink-0 text-right">
+                      <div className="text-[10px] font-mono text-[var(--muted-foreground)]">
+                        {new Date(evt.timestamp).toLocaleTimeString()}
+                      </div>
+                      {evt.durationMs > 0 && (
+                        <div className="text-[10px] font-mono text-[var(--muted-foreground)] opacity-60">
+                          {evt.durationMs}ms
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

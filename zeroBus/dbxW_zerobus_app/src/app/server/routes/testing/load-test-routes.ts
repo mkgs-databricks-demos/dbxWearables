@@ -13,6 +13,7 @@
 import express from 'express';
 import type { Application, Request, Response } from 'express';
 import { syntheticDataService } from '../../services/synthetic-data-service.js';
+import { zeroBusService } from '../../services/zerobus-service.js';
 import { type RecordType, RECORD_TYPES } from '../../../shared/synthetic-healthkit.js';
 
 // ── AppKit interface ──────────────────────────────────────────────────
@@ -243,6 +244,133 @@ export async function setupLoadTestRoutes(appkit: AppKitServer) {
           } catch {
             // Client already gone — nothing to do
           }
+        }
+      },
+    );
+
+
+    // ── GET /api/v1/testing/pool-status ─────────────────────────────
+    //
+    // Returns the current stream pool configuration and state.
+    // Used by the Load Test page to display live pool info.
+
+    app.get(
+      '/api/v1/testing/pool-status',
+      (_req: Request, res: Response) => {
+        const pool = zeroBusService.poolStatus();
+        const autoScale = zeroBusService.autoScaleStatus();
+        res.json({
+          status: 'ok',
+          ...pool,
+          auto_scale_detail: {
+            enabled: autoScale.enabled,
+            config: autoScale.config,
+            peak_inflight: autoScale.peak_inflight,
+            idle_checks: autoScale.idle_checks,
+          },
+          history: autoScale.history,
+        });
+      },
+    );
+
+
+    // ── POST /api/v1/testing/pool-autoscale ─────────────────────────
+    //
+    // Enable or disable automatic stream pool scaling based on load.
+    // When enabled, a background monitor checks utilization every few
+    // seconds and adjusts the pool size within min/max bounds.
+    //
+    // Enable:  { "enabled": true, "minSize": 2, "maxSize": 16 }
+    // Disable: { "enabled": false }
+
+    app.post(
+      '/api/v1/testing/pool-autoscale',
+      jsonParser,
+      (req: Request, res: Response) => {
+        try {
+          const { enabled, minSize, maxSize, cooldownMs, scaleUpStep, scaleDownStep } =
+            req.body as {
+              enabled?: boolean;
+              minSize?: number;
+              maxSize?: number;
+              cooldownMs?: number;
+              scaleUpStep?: number;
+              scaleDownStep?: number;
+            };
+
+          if (enabled === undefined || typeof enabled !== 'boolean') {
+            res.status(400).json({
+              status: 'error',
+              message: 'Missing or invalid "enabled" (boolean).',
+            });
+            return;
+          }
+
+          if (enabled) {
+            const config = zeroBusService.enableAutoScale({
+              ...(minSize !== undefined && { minSize }),
+              ...(maxSize !== undefined && { maxSize }),
+              ...(cooldownMs !== undefined && { cooldownMs }),
+              ...(scaleUpStep !== undefined && { scaleUpStep }),
+              ...(scaleDownStep !== undefined && { scaleDownStep }),
+            });
+            console.log(`[LoadTest] Auto-scale enabled: min=${config.minSize}, max=${config.maxSize}`);
+            res.json({ status: 'success', auto_scale: { enabled: true, ...config } });
+          } else {
+            zeroBusService.disableAutoScale();
+            console.log('[LoadTest] Auto-scale disabled');
+            res.json({ status: 'success', auto_scale: { enabled: false } });
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error('[LoadTest] Auto-scale config failed:', message);
+          res.status(400).json({ status: 'error', message });
+        }
+      },
+    );
+
+    // ── POST /api/v1/testing/pool-resize ────────────────────────────
+    //
+    // Dynamically resize the gRPC stream pool without restarting.
+    // Scale up: opens new streams (no disruption).
+    // Scale down: drains in-flight, then closes excess streams.
+    //
+    // Request:  { "poolSize": 8 }
+    // Response: { "status": "success", "oldSize": 2, "newSize": 8, "durationMs": 450 }
+
+    app.post(
+      '/api/v1/testing/pool-resize',
+      jsonParser,
+      async (req: Request, res: Response) => {
+        try {
+          const { poolSize } = req.body as { poolSize?: number };
+
+          if (poolSize === undefined || typeof poolSize !== 'number') {
+            res.status(400).json({
+              status: 'error',
+              message: 'Missing or invalid "poolSize" (number 1–32).',
+            });
+            return;
+          }
+
+          console.log(`[LoadTest] Pool resize requested: ${poolSize}`);
+          const result = await zeroBusService.resize(poolSize);
+
+          console.log(
+            `[LoadTest] Pool resized: ${result.oldSize} → ${result.newSize} (${result.durationMs}ms)`,
+          );
+
+          res.json({
+            status: 'success',
+            ...result,
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error('[LoadTest] Pool resize failed:', message);
+          res.status(400).json({
+            status: 'error',
+            message,
+          });
         }
       },
     );
