@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   Copy,
   Check,
@@ -7,8 +7,10 @@ import {
   ArrowUpRight,
   Tag,
   AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 import { BrandIcon } from '@/components/BrandIcon';
+import { type RecordType, type GeneratedPayload, generatePayload } from '@shared/synthetic-healthkit';
 
 /* ═══════════════════════════════════════════════════════════════════
    DocsPage — API Documentation (Swagger-style)
@@ -200,7 +202,7 @@ function StreamingArchitecture() {
                   severity: 'Info',
                   severityColor: 'bg-blue-50 text-blue-600',
                   title: 'Cross-stream ordering not guaranteed',
-                  desc: 'Each gRPC stream has independent ordering. Records from different HTTP requests may arrive in different order in the bronze table. This is acceptable because each iOS POST is an independent batch — ordering within a batch IS preserved.',
+                  desc: 'Each gRPC stream has independent ordering. Records from different HTTP requests may arrive in different order in the bronze table. This is acceptable because each iOS POST is an independent batch \u2014 ordering within a batch IS preserved.',
                 },
                 {
                   severity: 'Info',
@@ -260,7 +262,7 @@ function IngestEndpoint() {
         <div className="border-t border-[var(--border)] p-6 space-y-6">
           <p className="text-sm text-[var(--muted-foreground)] leading-relaxed">
             Receives NDJSON (Newline Delimited JSON) payloads from the iOS HealthKit app
-            and streams each record to the Unity Catalog bronze table via the ZeroBus Ingest SDK\'s persistent gRPC stream pool.
+            and streams each record to the Unity Catalog bronze table via the ZeroBus Ingest SDK's persistent gRPC stream pool.
             Each line in the NDJSON body becomes a separate record in the bronze table.
           </p>
 
@@ -306,7 +308,7 @@ function IngestEndpoint() {
                     <td className="py-2.5 px-4 font-mono text-xs text-[var(--dbx-lava-500)]">Authorization</td>
                     <td className="py-2.5 px-4"><OptionalBadge /></td>
                     <td className="py-2.5 px-4 text-xs text-[var(--muted-foreground)]">
-                      <code>Bearer &lt;JWT&gt;</code> — Direct client auth. Token&apos;s <code>sub</code> claim becomes user_id.
+                      <code>Bearer &lt;JWT&gt;</code> — Direct client auth. Token's <code>sub</code> claim becomes user_id.
                     </td>
                   </tr>
                 </tbody>
@@ -323,8 +325,7 @@ function IngestEndpoint() {
             </p>
             <CodeBlock
               title="Example: samples"
-              code={`{"type":"HKQuantityTypeIdentifierStepCount","value":8432,"unit":"count","startDate":"2025-01-15T08:00:00Z","endDate":"2025-01-15T08:30:00Z","sourceBundle":"com.apple.health"}
-{"type":"HKQuantityTypeIdentifierHeartRate","value":72,"unit":"count/min","startDate":"2025-01-15T08:15:00Z","endDate":"2025-01-15T08:15:00Z","sourceBundle":"com.apple.health"}`}
+              code={`{"type":"HKQuantityTypeIdentifierStepCount","value":8432,"unit":"count","startDate":"2025-01-15T08:00:00Z","endDate":"2025-01-15T08:30:00Z","sourceBundle":"com.apple.health"}\n{"type":"HKQuantityTypeIdentifierHeartRate","value":72,"unit":"count/min","startDate":"2025-01-15T08:15:00Z","endDate":"2025-01-15T08:15:00Z","sourceBundle":"com.apple.health"}`}
             />
           </div>
 
@@ -333,14 +334,7 @@ function IngestEndpoint() {
             <h4 className="font-bold text-sm text-[var(--foreground)] mb-3">Success Response</h4>
             <CodeBlock
               title="200 OK"
-              code={`{
-  "status": "success",
-  "message": "2 record(s) ingested",
-  "record_id": "a1b2c3d4-...",
-  "records_ingested": 2,
-  "record_ids": ["a1b2c3d4-...", "e5f6g7h8-..."],
-  "duration_ms": 145
-}`}
+              code={`{\n  "status": "success",\n  "message": "2 record(s) ingested",\n  "record_id": "a1b2c3d4-...",\n  "records_ingested": 2,\n  "record_ids": ["a1b2c3d4-...", "e5f6g7h8-..."],\n  "duration_ms": 145\n}`}
             />
           </div>
 
@@ -365,11 +359,7 @@ function IngestEndpoint() {
             </h4>
             <CodeBlock
               title="bash"
-              code={`curl -X POST /api/v1/healthkit/ingest \\
-  -H "Content-Type: application/x-ndjson" \\
-  -H "X-Record-Type: samples" \\
-  -H "X-Platform: ios" \\
-  -d '{"type":"HKQuantityTypeIdentifierStepCount","value":8432,"unit":"count","startDate":"2025-01-15T08:00:00Z","endDate":"2025-01-15T08:30:00Z"}'`}
+              code={`curl -X POST /api/v1/healthkit/ingest \\\\\n  -H "Content-Type: application/x-ndjson" \\\\\n  -H "X-Record-Type: samples" \\\\\n  -H "X-Platform: ios" \\\\\n  -d '{"type":"HKQuantityTypeIdentifierStepCount","value":8432,"unit":"count","startDate":"2025-01-15T08:00:00Z","endDate":"2025-01-15T08:30:00Z"}'`}
             />
           </div>
         </div>
@@ -455,19 +445,7 @@ function HealthEndpoint() {
             <h4 className="font-bold text-sm text-[var(--foreground)] mb-3">Response (streams active)</h4>
             <CodeBlock
               title="200 OK"
-              code={`{
-  "status": "ok",
-  "service": "zerobus-healthkit-ingest",
-  "env_configured": true,
-  "target_table": "hls_fde.wearables.wearables_zerobus",
-  "stream_pool": {
-    "pool_size": 2,
-    "active_streams": 2,
-    "initialized": true,
-    "inflight_requests": 0,
-    "draining": false
-  }
-}`}
+              code={`{\n  "status": "ok",\n  "service": "zerobus-healthkit-ingest",\n  "env_configured": true,\n  "target_table": "hls_fde.wearables.wearables_zerobus",\n  "stream_pool": {\n    "pool_size": 2,\n    "active_streams": 2,\n    "initialized": true,\n    "inflight_requests": 0,\n    "draining": false\n  }\n}`}
             />
           </div>
 
@@ -475,19 +453,7 @@ function HealthEndpoint() {
             <h4 className="font-bold text-sm text-[var(--foreground)] mb-3">Response (before first ingest — pool not yet initialized)</h4>
             <CodeBlock
               title="200 OK"
-              code={`{
-  "status": "ok",
-  "service": "zerobus-healthkit-ingest",
-  "env_configured": true,
-  "target_table": "hls_fde.wearables.wearables_zerobus",
-  "stream_pool": {
-    "pool_size": 2,
-    "active_streams": 0,
-    "initialized": false,
-    "inflight_requests": 0,
-    "draining": false
-  }
-}`}
+              code={`{\n  "status": "ok",\n  "service": "zerobus-healthkit-ingest",\n  "env_configured": true,\n  "target_table": "hls_fde.wearables.wearables_zerobus",\n  "stream_pool": {\n    "pool_size": 2,\n    "active_streams": 0,\n    "initialized": false,\n    "inflight_requests": 0,\n    "draining": false\n  }\n}`}
             />
           </div>
 
@@ -495,13 +461,7 @@ function HealthEndpoint() {
             <h4 className="font-bold text-sm text-[var(--foreground)] mb-3">Response (missing config)</h4>
             <CodeBlock
               title="200 OK"
-              code={`{
-  "status": "ok",
-  "service": "zerobus-healthkit-ingest",
-  "env_configured": false,
-  "target_table": "(not set)",
-  "missing_env_vars": ["ZEROBUS_ENDPOINT", "ZEROBUS_TARGET_TABLE"]
-}`}
+              code={`{\n  "status": "ok",\n  "service": "zerobus-healthkit-ingest",\n  "env_configured": false,\n  "target_table": "(not set)",\n  "missing_env_vars": ["ZEROBUS_ENDPOINT", "ZEROBUS_TARGET_TABLE"]\n}`}
             />
           </div>
 
@@ -523,13 +483,28 @@ function HealthEndpoint() {
 
 /* ── Try It Panel ───────────────────────────────────────────────── */
 function TryItPanel() {
-  const [recordType, setRecordType] = useState('samples');
-  const [body, setBody] = useState(
-    '{"type":"HKQuantityTypeIdentifierStepCount","value":8432,"unit":"count","startDate":"2025-01-15T08:00:00Z","endDate":"2025-01-15T08:30:00Z"}'
-  );
+  const [recordType, setRecordType] = useState<RecordType>('samples');
+  const [payload, setPayload] = useState<GeneratedPayload>(() => generatePayload('samples'));
+  const [body, setBody] = useState(payload.ndjson);
   const [response, setResponse] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<number | null>(null);
+  const [isSpinning, setIsSpinning] = useState(false);
+
+  // Regenerate payload when record type changes
+  useEffect(() => {
+    const newPayload = generatePayload(recordType);
+    setPayload(newPayload);
+    setBody(newPayload.ndjson);
+  }, [recordType]);
+
+  const handleGenerateNew = useCallback(() => {
+    setIsSpinning(true);
+    const newPayload = generatePayload(recordType);
+    setPayload(newPayload);
+    setBody(newPayload.ndjson);
+    setTimeout(() => setIsSpinning(false), 300);
+  }, [recordType]);
 
   const sendRequest = async () => {
     setLoading(true);
@@ -558,36 +533,57 @@ function TryItPanel() {
 
   return (
     <div className="mt-4 bg-[var(--muted)] rounded-xl p-5 space-y-4">
-      <div className="grid sm:grid-cols-2 gap-4">
-        <div>
+      {/* Controls row */}
+      <div className="flex flex-wrap items-end gap-4">
+        <div className="flex-1 min-w-[200px]">
           <label className="block text-xs font-medium text-[var(--muted-foreground)] mb-1">
             X-Record-Type
           </label>
           <select
             value={recordType}
-            onChange={(e) => setRecordType(e.target.value)}
+            onChange={(e) => setRecordType(e.target.value as RecordType)}
             className="w-full bg-[var(--card)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm font-mono text-[var(--foreground)]"
           >
-            {['samples', 'workouts', 'sleep', 'activity_summaries', 'deletes'].map((t) => (
+            {(['samples', 'workouts', 'sleep', 'activity_summaries', 'deletes'] as RecordType[]).map((t) => (
               <option key={t} value={t}>{t}</option>
             ))}
           </select>
         </div>
+
+        <button
+          onClick={handleGenerateNew}
+          className="flex items-center gap-2 px-4 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm font-medium text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors"
+          title="Generate new random payload"
+        >
+          <RefreshCw className={`h-4 w-4 transition-transform ${isSpinning ? 'animate-spin' : ''}`} />
+          Generate New
+        </button>
       </div>
 
+      {/* Payload description */}
+      <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+        <BrandIcon name="data-flow" className="h-3.5 w-3.5" />
+        <span>
+          <strong>{payload.recordCount}</strong> record{payload.recordCount !== 1 ? 's' : ''} — {payload.description}
+        </span>
+      </div>
+
+      {/* Request body textarea */}
       <div>
         <label className="block text-xs font-medium text-[var(--muted-foreground)] mb-1">
-          Request Body (NDJSON)
+          Request Body (NDJSON) — edit or generate new
         </label>
         <textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}
-          rows={4}
-          className="w-full bg-[var(--card)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs font-mono text-[var(--foreground)] resize-y"
+          rows={Math.min(12, body.split('\n').length + 1)}
+          className="w-full bg-[var(--card)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs font-mono text-[var(--foreground)] resize-y leading-relaxed"
           placeholder="One JSON object per line..."
+          spellCheck={false}
         />
       </div>
 
+      {/* Send button */}
       <button
         onClick={sendRequest}
         disabled={loading}
@@ -597,6 +593,7 @@ function TryItPanel() {
         {loading ? 'Sending...' : 'Send Request'}
       </button>
 
+      {/* Response display */}
       {response && (
         <div>
           <div className="flex items-center gap-2 mb-2">
@@ -635,7 +632,7 @@ function RecordTypesRef() {
           <tbody className="divide-y divide-[var(--border)]">
             {[
               ['samples', 'HK quantity/category samples', 'Step count, heart rate, distance, energy burned, VO2 max, SpO2, sleep analysis, stand hours'],
-              ['workouts', 'Workout records', 'Activity type, duration, energy burned, distance — 70+ activity types'],
+              ['workouts', 'Workout records', 'Activity type, duration, energy burned, distance \u2014 70+ activity types'],
               ['sleep', 'Sleep sessions', 'Grouped from contiguous sleep stage samples (inBed, asleepCore, asleepDeep, asleepREM, awake)'],
               ['activity_summaries', 'Daily ring data', 'Active energy, exercise minutes, stand hours with goals'],
               ['deletes', 'Deletion records', 'UUID + sample_type for soft-delete matching on backend'],
@@ -676,7 +673,7 @@ function ErrorCodesRef() {
               ['400', 'Missing X-Record-Type header', 'Missing X-Record-Type header. Provide any non-empty string...'],
               ['400', 'Empty request body', 'Request body is empty. Expected NDJSON...'],
               ['400', 'No valid JSON lines', 'No valid records found. Parse errors: Line 1: invalid JSON'],
-              ['500', 'ZeroBus SDK stream failure', 'Ingestion failed: stream write error — SDK will attempt automatic recovery'],
+              ['500', 'ZeroBus SDK stream failure', 'Ingestion failed: stream write error \u2014 SDK will attempt automatic recovery'],
             ].map(([code, condition, msg], i) => (
               <tr key={i} className="hover:bg-[var(--muted)]/50">
                 <td className="py-3 px-4">
