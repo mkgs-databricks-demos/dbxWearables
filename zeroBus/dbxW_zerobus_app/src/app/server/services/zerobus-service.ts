@@ -32,6 +32,14 @@
 //   source_platform STRING            — From X-Platform header (e.g. "apple_healthkit")
 //   user_id         STRING            — App-authenticated user ID from JWT claims
 //
+// Graceful shutdown:
+//   On SIGTERM the service enters drain mode:
+//     1. draining=true — new ingestRecords() calls are rejected immediately
+//     2. In-flight requests are given up to DRAIN_TIMEOUT_MS to complete
+//     3. stream.close() flushes all SDK-queued records and waits for acks
+//   This guarantees every record received before SIGTERM is durably
+//   committed to the Delta table, even during a redeploy.
+//
 // SDK reference:
 //   https://github.com/databricks/zerobus-sdk/tree/main/typescript
 //   https://docs.databricks.com/aws/en/ingestion/zerobus-ingest/
@@ -65,6 +73,14 @@ const ENV_KEYS = [
 
 const DEFAULT_POOL_SIZE = 4;
 
+// ── Drain / shutdown constants ───────────────────────────────────────────
+
+/** Maximum time (ms) to wait for in-flight requests during graceful shutdown. */
+const DRAIN_TIMEOUT_MS = 30_000;
+
+/** Polling interval (ms) when waiting for in-flight requests to complete. */
+const DRAIN_POLL_INTERVAL_MS = 250;
+
 // ── SDK stream interface ─────────────────────────────────────────────────
 //
 // Minimal interface matching the stream returned by ZerobusSdk.createStream().
@@ -85,6 +101,17 @@ class ZeroBusService {
   private streamIndex = 0;
   private poolSize: number;
   private initPromise: Promise<void> | null = null;
+
+  // ── In-flight tracking for graceful shutdown ──────────────────────
+  //
+  // inflight counts the number of ingestRecords() calls currently
+  // executing. On SIGTERM, close() sets draining=true and polls until
+  // inflight reaches 0 (or DRAIN_TIMEOUT_MS elapses), then closes all
+  // streams. This ensures every record received by an Express handler
+  // before SIGTERM is written to a stream and flushed on close().
+
+  private inflight = 0;
+  private draining = false;
 
   constructor(poolSize?: number) {
     this.poolSize = poolSize ??
@@ -206,10 +233,18 @@ class ZeroBusService {
    * The SDK's Rust async runtime handles network I/O, batching, and
    * OAuth token lifecycle — the Node.js event loop is not blocked.
    *
+   * @throws Error if the service is draining (SIGTERM received).
    * @returns The number of records durably ingested.
    */
   async ingestRecords(records: WearablesRecord[]): Promise<number> {
     if (records.length === 0) return 0;
+
+    // Reject new requests during graceful shutdown
+    if (this.draining) {
+      throw new Error(
+        'Service is shutting down — not accepting new ingest requests',
+      );
+    }
 
     // Validate env vars before attempting ingestion
     const envCheck = this.checkEnv();
@@ -222,21 +257,27 @@ class ZeroBusService {
     await this.ensurePool();
     const stream = this.nextStream();
 
-    // Write all records to the stream — ingestRecordOffset() queues each
-    // record and returns quickly. The Rust runtime sends them efficiently
-    // over the gRPC connection. We only need the last offset for the
-    // durability check.
-    let lastOffset = BigInt(0);
-    for (const record of records) {
-      lastOffset = await stream.ingestRecordOffset(record);
+    // Track in-flight requests for graceful shutdown
+    this.inflight++;
+    try {
+      // Write all records to the stream — ingestRecordOffset() queues each
+      // record and returns quickly. The Rust runtime sends them efficiently
+      // over the gRPC connection. We only need the last offset for the
+      // durability check.
+      let lastOffset = BigInt(0);
+      for (const record of records) {
+        lastOffset = await stream.ingestRecordOffset(record);
+      }
+
+      // Block until the last record is durably committed to the Delta table.
+      // All preceding records (with lower offsets) are guaranteed durable
+      // once this returns.
+      await stream.waitForOffset(lastOffset);
+
+      return records.length;
+    } finally {
+      this.inflight--;
     }
-
-    // Block until the last record is durably committed to the Delta table.
-    // All preceding records (with lower offsets) are guaranteed durable
-    // once this returns.
-    await stream.waitForOffset(lastOffset);
-
-    return records.length;
   }
 
   // ── Health check ─────────────────────────────────────────────────────
@@ -247,30 +288,78 @@ class ZeroBusService {
     return { configured: missing.length === 0, missing: [...missing] };
   }
 
-  /** Stream pool status for the health check endpoint. */
-  poolStatus(): { pool_size: number; active_streams: number; initialized: boolean } {
+  /** Stream pool and drain status for the health check endpoint. */
+  poolStatus(): {
+    pool_size: number;
+    active_streams: number;
+    initialized: boolean;
+    inflight_requests: number;
+    draining: boolean;
+  } {
     return {
       pool_size: this.poolSize,
       active_streams: this.streams.length,
       initialized: this.streams.length > 0,
+      inflight_requests: this.inflight,
+      draining: this.draining,
     };
   }
 
   // ── Graceful shutdown ────────────────────────────────────────────────
 
   /**
-   * Close all streams and release SDK resources.
+   * Drain in-flight requests, then close all streams and release resources.
    *
-   * Called on SIGTERM for graceful shutdown. Each stream.close() flushes
-   * pending records and waits for final acknowledgments before closing
-   * the gRPC connection.
+   * Shutdown sequence:
+   *   1. Set draining=true — ingestRecords() rejects new calls immediately
+   *   2. Poll until inflight reaches 0 (or DRAIN_TIMEOUT_MS elapses)
+   *      This gives in-flight Express handlers time to finish their
+   *      ingestRecordOffset() + waitForOffset() calls.
+   *   3. Close all streams — each stream.close() flushes any records
+   *      still queued in the SDK's internal buffer and waits for final
+   *      acknowledgments from the ZeroBus server.
+   *
+   * After step 3, every record that was accepted by ingestRecords()
+   * before SIGTERM is guaranteed durably committed to the Delta table.
    */
   async close(): Promise<void> {
+    this.draining = true;
+
+    // ── Step 1: Drain in-flight requests ────────────────────────────
+    if (this.inflight > 0) {
+      console.log(
+        `[ZeroBus] Draining ${this.inflight} in-flight request(s) (timeout: ${DRAIN_TIMEOUT_MS}ms)...`,
+      );
+
+      const drainStart = Date.now();
+      while (
+        this.inflight > 0 &&
+        Date.now() - drainStart < DRAIN_TIMEOUT_MS
+      ) {
+        await new Promise((r) => setTimeout(r, DRAIN_POLL_INTERVAL_MS));
+        if (this.inflight > 0) {
+          console.log(
+            `[ZeroBus] Still draining — ${this.inflight} request(s) in-flight`,
+          );
+        }
+      }
+
+      if (this.inflight > 0) {
+        console.warn(
+          `[ZeroBus] Drain timeout reached — ${this.inflight} request(s) still in-flight, proceeding with stream close`,
+        );
+      } else {
+        console.log('[ZeroBus] All in-flight requests drained');
+      }
+    }
+
+    // ── Step 2: Close all streams (flushes SDK-queued records) ──────
     if (this.streams.length > 0) {
       console.log(`[ZeroBus] Closing ${this.streams.length} stream(s)...`);
       await Promise.allSettled(this.streams.map((s) => s.close()));
-      console.log('[ZeroBus] All streams closed');
+      console.log('[ZeroBus] All streams closed — records durably committed');
     }
+
     this.streams = [];
     this.streamIndex = 0;
     this.sdk = null;

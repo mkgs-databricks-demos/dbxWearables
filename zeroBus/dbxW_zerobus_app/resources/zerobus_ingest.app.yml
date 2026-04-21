@@ -31,6 +31,7 @@
 #   workspace_url           — Databricks workspace URL
 #   zerobus_endpoint        — ZeroBus Ingest server endpoint
 #   target_table_name       — Fully qualified bronze table name
+#   zerobus_stream_pool_size — SDK gRPC stream pool size (non-sensitive config)
 #
 # Observability (Beta):
 #   App telemetry is enabled via telemetry_export_destinations. The
@@ -138,6 +139,21 @@ resources:
           secret:
             scope: ${var.secret_scope_name}
             key: target_table_name
+            permission: READ
+
+        # SDK stream pool size — non-sensitive config stored in the secret
+        # scope to enable per-target control via the bundle variable
+        # ${var.zerobus_stream_pool_size}. The service falls back to a
+        # default of 4 if the env var is unset or the key is missing.
+        # Populate via: databricks secrets put-secret \
+        #   --scope dbxw_zerobus_credentials \
+        #   --key zerobus_stream_pool_size \
+        #   --string-value "${var.zerobus_stream_pool_size}"
+        - name: zerobus-stream-pool-size
+          description: Number of concurrent gRPC streams in the ZeroBus SDK stream pool
+          secret:
+            scope: ${var.secret_scope_name}
+            key: zerobus_stream_pool_size
             permission: READ
 
         # Lakebase Postgres — direct wire protocol (port 5432) via AppKit
