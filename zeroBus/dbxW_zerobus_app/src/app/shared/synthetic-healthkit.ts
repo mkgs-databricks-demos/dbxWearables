@@ -11,7 +11,7 @@
 //   - Triangular for workout duration, sleep hours, activity calories
 //   - Uniform for time offsets, distance variance
 //
-// Sample payloads produce variable record counts (1-8, avg ~3.4) with
+// Sample payloads produce variable record counts (3-12, avg ~6.2) with
 // randomly selected HealthKit quantity types weighted by real-world frequency.
 //
 // Every call generates fresh UUIDs and timestamps anchored to Date.now().
@@ -265,19 +265,22 @@ function randomSampleType(): SampleTypeConfig {
 }
 
 /**
- * Random sample count per payload: 1-8, skewed toward 2-4.
+ * Random sample count per payload: 3-12, skewed toward 5-7.
  *
- * Distribution: 1 (5%), 2 (20%), 3 (30%), 4 (25%), 5 (10%), 6-8 (10%)
- * Weighted average: ~3.4 records per payload
+ * Distribution:
+ *   3 (5%), 4 (10%), 5 (20%), 6 (25%), 7 (20%), 8 (10%), 9 (5%), 10-12 (5%)
+ * Weighted average: ~6.2 records per payload
  */
 function randomSampleCount(): number {
   const r = Math.random();
-  if (r < 0.05) return 1;
-  if (r < 0.25) return 2;
-  if (r < 0.55) return 3;
-  if (r < 0.80) return 4;
-  if (r < 0.90) return 5;
-  return 6 + Math.floor(Math.random() * 3);
+  if (r < 0.05) return 3;
+  if (r < 0.15) return 4;
+  if (r < 0.35) return 5;
+  if (r < 0.60) return 6;
+  if (r < 0.80) return 7;
+  if (r < 0.90) return 8;
+  if (r < 0.95) return 9;
+  return 10 + Math.floor(Math.random() * 3);
 }
 
 /** Generate a single HealthKit quantity sample record */
@@ -307,13 +310,13 @@ function generateSingleSample(config: SampleTypeConfig, now: Date): Record<strin
 // ── Per-Record-Type Payload Generators ───────────────────────────────────
 
 /**
- * Generate samples payload: variable count (1-8) of mixed HealthKit sample types.
+ * Generate samples payload: variable count (3-12) of mixed HealthKit sample types.
  *
  * Mirrors real iOS sync behavior where each POST contains a variable number
  * of samples collected since the last sync — some heart rate, some steps,
  * some active energy, etc. The mix and count vary every call.
  *
- * Average: ~3.4 records per payload (weighted toward 2-4).
+ * Average: ~6.2 records per payload (skewed toward 5-7).
  * Types: weighted random from 10 HealthKit quantity types.
  */
 export function generateSamplesPayload(): GeneratedPayload {
@@ -329,7 +332,7 @@ export function generateSamplesPayload(): GeneratedPayload {
     typeCounts.set(shortType, (typeCounts.get(shortType) || 0) + 1);
   }
 
-  // Build description like "3 samples (2 HeartRate, 1 StepCount)"
+  // Build description like "6 samples (3 HeartRate, 2 StepCount, 1 OxygenSaturation)"
   const typeDesc = Array.from(typeCounts.entries())
     .map(([t, n]) => `${n} ${t}`)
     .join(', ');
@@ -548,7 +551,7 @@ export function generateAllTypes(
 
 /** Average records per payload by type — used for progress estimation */
 export const AVG_RECORDS_PER_PAYLOAD: Record<RecordType, number> = {
-  samples: 3.4,
+  samples: 6.2,
   workouts: 1,
   sleep: 1,
   activity_summaries: 1,

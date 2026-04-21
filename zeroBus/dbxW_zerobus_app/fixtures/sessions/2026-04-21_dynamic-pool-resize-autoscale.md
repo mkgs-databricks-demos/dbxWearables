@@ -7,7 +7,7 @@
 
 ### Summary
 
-Added runtime-resizable gRPC stream pool to the ZeroBus ingest service. The pool can be resized manually via API/UI or automatically based on load. A background monitor scales up when streams are saturated or call rate is high, and scales down after sustained idle. All resize events (auto, manual, initial) are recorded in a ring buffer and displayed in a scrollable event log on the Load Test page. Auto-scaling responds to all `ingestRecords()` callers -- real iOS HealthKit traffic and synthetic load test traffic alike. Per-preset batch sizes reduce gRPC round-trips for larger tests. Proxy timeout handling prevents false error states on long-running tests.
+Added runtime-resizable gRPC stream pool to the ZeroBus ingest service. The pool can be resized manually via API/UI or automatically based on load. A background monitor scales up when streams are saturated or call rate is high, and scales down after sustained idle. All resize events (auto, manual, initial) are recorded in a ring buffer and displayed in a scrollable event log on the Load Test page. Auto-scaling responds to all `ingestRecords()` callers -- real iOS HealthKit traffic and synthetic load test traffic alike. Per-preset batch sizes reduce gRPC round-trips for larger tests. Proxy timeout handling prevents false error states on long-running tests. Variable sample generation produces realistic mixed-type payloads (3-12 records, 10 HealthKit types) instead of fixed 3-record payloads.
 
 ---
 
@@ -225,6 +225,44 @@ The existing red error display is preserved for genuine failures (errors before 
 
 **Platform constraint:** Tests under ~5 minutes (up to the Large preset at 50K payloads) are unaffected. The Massive preset (500K payloads) will likely hit the timeout with auto-scale enabled. Future options: chunk massive tests into sub-5-minute segments, or switch from SSE to WebSockets for the progress stream.
 
+#### 10. Variable Sample Type & Count Generation (`synthetic-healthkit.ts`)
+
+Previously, `generateSamplesPayload()` always produced exactly 3 records: 2 heart rate readings + 1 step count. Every payload was structurally identical -- only the values varied. This is unrealistic: real iOS HealthKit syncs contain variable numbers of mixed sample types depending on time since last sync.
+
+**Sample Type Registry:** Added a `SampleTypeConfig` interface and `SAMPLE_TYPES` array with 10 HealthKit quantity types, each with realistic value generators, source devices, duration semantics, and selection weights:
+
+| Type | Weight | Value Distribution | Duration |
+| --- | --- | --- | --- |
+| HeartRate | 3 (20%) | Gaussian ~72 bpm, 20% elevated | point-in-time |
+| StepCount | 2 (13%) | Gaussian ~5500/hr | 15-120 min |
+| ActiveEnergyBurned | 2 (13%) | Triangular 50-400 kcal | 15-60 min |
+| DistanceWalkingRunning | 2 (13%) | Gaussian ~800m | 5-45 min |
+| BasalEnergyBurned | 1 (7%) | Triangular 50-90 kcal/hr | ~60 min segments |
+| RestingHeartRate | 1 (7%) | Gaussian ~62 bpm | point-in-time |
+| HeartRateVariabilitySDNN | 1 (7%) | Gaussian ~45 ms | point-in-time |
+| OxygenSaturation | 1 (7%) | Gaussian ~97.5% (clamped 90-100) | point-in-time |
+| RespiratoryRate | 1 (7%) | Gaussian ~15/min | point-in-time |
+| FlightsClimbed | 1 (7%) | Uniform 1-8 | 2-15 min |
+
+Weighted selection uses a pre-computed flat array (`_weightedSampleTypes`) for O(1) random picks. Total weight: 15.
+
+**Variable count distribution (`randomSampleCount()`):** 3-12 records per payload, skewed toward 5-7:
+
+```
+3 (5%), 4 (10%), 5 (20%), 6 (25%), 7 (20%), 8 (10%), 9 (5%), 10-12 (5%)
+Weighted average: ~6.2 records per payload
+```
+
+**`generateSingleSample()` builder:** Takes a `SampleTypeConfig` + timestamp, generates a complete record with uuid, type, value, unit, start/end dates (point-in-time vs duration based on config), random source device, and optional metadata.
+
+**`generateSamplesPayload()` rewrite:** Calls `randomSampleCount()` then `randomSampleType()` for each record. Builds a dynamic description like `"6 samples (3 HeartRate, 2 StepCount, 1 OxygenSaturation)"` from type counts.
+
+**`generateDeletesPayload()` update:** Now produces 1-3 deletes per payload (70% single, 18% double, 12% triple, avg ~1.4). Delete references now use the full 10-type registry instead of the previous 3 hardcoded types.
+
+**`AVG_RECORDS_PER_PAYLOAD` export:** New constant exported from the shared module so `synthetic-data-service.ts` can estimate chunk counts accurately. Replaces the hardcoded `rt === 'samples' ? 3 : 1` with `AVG_RECORDS_PER_PAYLOAD[rt] ?? 1`.
+
+**Impact on data volume:** With 200K sample payloads (Massive preset), the expected sample records roughly doubles from ~600K to ~1.24M. The load test page's progress estimator uses `AVG_RECORDS_PER_PAYLOAD` to calculate accurate chunk totals.
+
 ---
 
 ### Files Modified
@@ -234,6 +272,8 @@ The existing red error display is preserved for genuine failures (errors before 
 | `src/app/server/services/zerobus-service.ts` | 747 | Credential instance fields, `resize()`, `AutoScaleConfig`, `enableAutoScale()`, `disableAutoScale()`, `checkAutoScale()` with dual-metric triggers (`peakInflight` + `callRate`), `callsSinceLastCheck` tracking, `ResizeEvent` ring buffer with `callRate` field, `recordResizeEvent()`, `autoScaleStatus()` |
 | `src/app/server/routes/testing/load-test-routes.ts` | 385 | `GET /pool-status`, `POST /pool-resize`, `POST /pool-autoscale` endpoints, `autoScaleStatus()` in response |
 | `src/app/client/src/pages/testing/LoadTestPage.tsx` | ~880 | Stream Pool card with auto-scale toggle + min/max inputs, manual resize, pool status polling (3s during tests), `toggleAutoScale` callback, `PoolStatus.auto_scale` interface, `ResizeEvent` interface with `callRate`, event history log panel with `calls: N` annotations, per-preset `batchSize` field (500/500/1000/2000/5000), proxy timeout graceful handling (yellow warning banner instead of red error), `fetchPoolStatus()` in `finally` block |
+| `src/app/shared/synthetic-healthkit.ts` | 560 | `SampleTypeConfig` interface, `SAMPLE_TYPES` registry (10 weighted HealthKit types), `randomSampleType()` weighted picker, `randomSampleCount()` (3-12, avg ~6.2), `generateSingleSample()` builder, rewritten `generateSamplesPayload()` with variable count + mixed types, updated `generateDeletesPayload()` (1-3 variable count, full type registry), `AVG_RECORDS_PER_PAYLOAD` export |
+| `src/app/server/services/synthetic-data-service.ts` | ~300 | Import `AVG_RECORDS_PER_PAYLOAD`, replaced hardcoded `rt === 'samples' ? 3 : 1` chunk estimate with `AVG_RECORDS_PER_PAYLOAD[rt]` lookup |
 
 ---
 
@@ -254,3 +294,7 @@ The existing red error display is preserved for genuine failures (errors before 
 7. **Per-preset batch sizes over a single global default.** Larger presets need proportionally larger batches to avoid excessive gRPC round-trip overhead. The preset sets the default; the user can still override manually. This is a UX improvement -- users don't need to remember to bump batch size when selecting Large or Massive.
 
 8. **Graceful degradation on proxy timeout.** Rather than treating a mid-test network disconnect as a failure, the client recognizes that records were already ingested and shows partial success. This prevents false alarm error states for tests that actually completed on the server side. The 5-minute proxy limit is a platform constraint, not a bug.
+
+9. **Weighted sample type registry over hardcoded record lists.** The old `generateSamplesPayload()` always produced 2 HR + 1 step — easy to implement but produces monotonous test data that doesn't exercise schema diversity in the bronze table. The registry approach (config-driven types with weights, value generators, and duration semantics) is more realistic and extensible — adding a new HealthKit type is a single object push to `SAMPLE_TYPES`. The weighted distribution mirrors real Apple Watch behavior where heart rate samples dominate.
+
+10. **Variable record counts with exported averages.** Rather than requiring callers to know the internal distribution, the module exports `AVG_RECORDS_PER_PAYLOAD` so the chunk estimator stays accurate without coupling to the distribution logic. If the distribution changes, only the constant needs updating.
