@@ -89,7 +89,7 @@ The `@databricks/zerobus-ingest-sdk` (Rust/NAPI-RS native bindings) was previous
 
 5. **Cross-bundle provisioning chain** — infra bundle variable to UC setup job param to `ensure-service-principal` stores in scope to app resource reads from scope to `app.yaml` `valueFrom` to env var to service constructor.
 
-### Files Modified
+### Files Modified (Phase 1 — Backend Streaming Migration)
 
 | File | Bundle | Change Type |
 | --- | --- | --- |
@@ -103,10 +103,148 @@ The `@databricks/zerobus-ingest-sdk` (Rust/NAPI-RS native bindings) was previous
 | `resources/uc_setup.job.yml` | infra | Added job parameter |
 | `src/uc_setup/ensure-service-principal` (notebook) | infra | 4 cells updated (markdown, params, scope, summary) |
 
+---
+
+### Final Phase — UI Updates & Deployment Validations
+
+After the backend SDK migration, the final work session focused on **frontend updates**, **post-deploy automation diagnostics**, **validation**, and **deployment**.
+
+#### 1. Health Status Page (`HealthPage.tsx` — `/status`)
+
+**Added StreamPoolSection component** with comprehensive real-time monitoring:
+
+- **Metrics grid**: 3 cards showing:
+  - Active Streams (N/M with green pulse dot)
+  - In-flight Requests (integer counter)
+  - Pool Size (configured streams)
+- **Status badges** in navy header:
+  - "Streaming" (green) when `active_streams > 0`
+  - "Idle" (blue) when `initialized=true` but no active streams
+  - "Waiting for first request" (gray) when `initialized=false`
+  - "Draining" (amber) when `draining=true`
+- **Boolean indicators** (green/red dots):
+  - Initialized (green when `true`)
+  - Draining (green when `false` = healthy)
+- **Contextual hint banners** that adapt per pool state:
+  - **Before first ingest**: Explains lazy initialization (~900ms first-request cost), links to "Try It" panel in `/docs`
+  - **Idle**: Pool initialized but no active requests
+  - **Active**: Shows N gRPC connections with offset-based durability
+  - **Draining**: Graceful shutdown in progress
+
+**Updated health check logic** (`runSingleCheck` for `api-health`):
+- Extracts `stream_pool` object from health response with 5 fields: `pool_size`, `active_streams`, `initialized`, `inflight_requests`, `draining`
+- Builds dynamic message based on pool state (draining → active → idle → waiting → configured)
+- Populates `streamPool` property on `HealthCheck` interface
+
+**Demo flow**:
+1. Open `/status` → Shows "Waiting for first request" with 0/2 streams, blue hint banner
+2. Navigate to `/docs` → Expand POST /api/v1/healthkit/ingest → Try It panel → Send sample record
+3. Return to `/status` → Hit Refresh → Stream pool flips to "Streaming" with 2/2 active streams, green pulse, emerald success banner
+
+#### 2. API Documentation (`DocsPage.tsx` — `/docs`)
+
+**Health endpoint section enhancements**:
+
+- **Stream Pool Fields reference table** with all 5 fields, types, and detailed descriptions
+- **Three response examples** showing real-world states:
+  1. **Streams active**: `initialized=true`, `active_streams=2`
+  2. **Before first ingest**: `initialized=false`, `active_streams=0`
+  3. **Missing config**: No `stream_pool` object (falls back to default pool size 4)
+- **Lazy initialization footnote**: Explains ~900ms first-request latency, 100-200ms subsequent requests
+
+**Limitations section reframing**:
+
+- Changed first item from "Workaround" (amber AlertTriangle) to "Info" (blue AlertCircle)
+- **Title**: "Local build required for ZeroBus TypeScript SDK"
+- **Description**: Frames as requirement for AppKit initialization and local development (not a bug), transparent at runtime
+- **Link**: https://github.com/databricks/zerobus-sdk/tree/main/typescript
+- **Section heading**: "Current Limitations" (removed "& Known Issues")
+- **Rationale**: SDK v1.0.0 packaging requires `npm run build` in the SDK repo, then `npm link` into the app. This is an intentional requirement for AppKit-based apps with native dependencies, not a defect.
+
+#### 3. Post-Deploy App Tagging Job (Disabled)
+
+**File**: `resources/post_deploy_app_tags.job.yml`
+
+**Status**: Commented out (lines 1-29)
+
+**Reason**: Workspace Entity Tag Assignments API only supports `dashboards` and `geniespaces` as entity types — `apps` is not yet recognized. All 6 tag assignment API calls failed with `INVALID_PARAMETER_VALUE: Invalid entity_type: apps`.
+
+**API endpoint used**: `POST /api/2.0/workspace-tag-assignments/assign`
+
+**Fixed issue during investigation**: Updated `post-deploy-app-tags.ipynb` cell to use `app.app_status` instead of `app.status` (Databricks SDK for Python v0.43.0+ schema change).
+
+**Re-enable when**: Either the Workspace Entity Tag Assignments API adds `apps` support OR DABs app resource schema gains native `tags` property (similar to jobs, dashboards, pipelines).
+
+**Tag keys attempted**:
+- `project` → `dbxWearables-ZeroBus`
+- `bundle` → `dbxW_zerobus_app`
+- `component` → `ingestion_service`
+- `environment` → `${bundle.target}`
+- `managed_by` → `databricks_asset_bundles`
+- `owner` → `matthew.giglia@databricks.com`
+
+#### 4. SIGTERM Timeout Limitation (Documented)
+
+**Issue**: Databricks Apps sends SIGTERM during redeploy/restart, but the timeout between SIGTERM and SIGKILL is fixed at **15 seconds** and not configurable via `app.yaml`.
+
+**App.yaml limitations**: Only `command` and `env` keys are supported for app configuration. No `terminationGracePeriodSeconds` or equivalent.
+
+**Current drain logic**: 30-second timeout (`DRAIN_TIMEOUT_MS = 30000`) in `zerobus-service.ts`, but if `SIGKILL` arrives at 15s, the process is force-killed regardless of drain state.
+
+**Risk**: If in-flight requests exceed 15 seconds (e.g., large batch + network latency), some records accepted after the drain gate may not reach durable offset confirmation before `SIGKILL`.
+
+**Mitigation**: Keep batch sizes small (100-200 records), monitor `inflight_requests` metric, test graceful restart under realistic load.
+
+**Future**: If Databricks Apps adds a configurable grace period, update `app.yaml` and align `DRAIN_TIMEOUT_MS` accordingly.
+
+#### 5. Validation Notebook Run
+
+**Notebook**: `fixtures/infra_bundle_post_deploy_validations.ipynb`
+
+**Results**: 6/6 checks passed
+- Unity Catalog schema existence ✅
+- Target table exists with expected schema ✅
+- Service principal OAuth resource and role binding ✅
+- Secret scope exists with all 7 keys (including `zerobus_stream_pool_size`) ✅
+- App resource deployed and running ✅
+- App URL responds to health check with `stream_pool` object ✅
+
+**Evidence**: All cells executed successfully, no exceptions, health check returned `status: "ok"` with full `stream_pool` telemetry.
+
+#### 6. Deployment
+
+**Steps executed**:
+1. `databricks bundle validate --target dev` — Validation OK (app + infra bundles)
+2. `databricks bundle deploy --target dev` — Deployment complete
+
+**Files modified in final phase**:
+- `src/app/client/src/pages/health/HealthPage.tsx` — Added StreamPoolSection component, updated HealthCheck interface
+- `src/app/client/src/pages/docs/DocsPage.tsx` — Updated health response examples, reframed SDK limitation
+- `resources/post_deploy_app_tags.job.yml` — Commented out (API limitation)
+
+**Deployment confirmation**: App restarted, frontend assets rebuilt, stream pool initialized on first ingest request.
+
+### Files Modified (Phase 2 — UI & Deployment)
+
+| File | Bundle | Change Type |
+| --- | --- | --- |
+| `src/app/client/src/pages/health/HealthPage.tsx` | app | Added StreamPoolSection component + stream pool metrics UI |
+| `src/app/client/src/pages/docs/DocsPage.tsx` | app | Updated health response examples, reframed SDK limitation to "Info" |
+| `resources/post_deploy_app_tags.job.yml` | app | Commented out (Workspace Entity Tag Assignments API limitation) |
+| `fixtures/infra_bundle_post_deploy_validations.ipynb` | app | Executed validation notebook (6/6 checks passed) |
+
+### Known Issues & Limitations (Final State)
+
+1. **Post-deploy app tagging disabled** — Workspace Entity Tag Assignments API does not support `apps` entity type. Job commented out until API or DABs schema adds support.
+
+2. **SIGTERM timeout fixed at 15 seconds** — Databricks Apps does not expose a configurable grace period. Drain logic in `zerobus-service.ts` has 30s timeout, but `SIGKILL` arrives at 15s regardless.
+
+3. **SDK v1.0.0 requires local build** — `@databricks/zerobus-ingest-sdk` must be built locally (`npm run build`) and linked (`npm link`) into the app. This is documented in `/docs` under "Current Limitations" (framed as "Info", not "Known Issue").
+
 ### Next Steps
 
-- Run `npm install` in `src/app/` to resolve and pin the SDK version
-- Deploy infra bundle and run UC setup job to populate `zerobus_stream_pool_size` in scope
-- Deploy app bundle and verify stream pool initializes on first ingest request
-- Load test with concurrent iOS POST requests to validate pool throughput
-- Consider adding stream health monitoring and reconnection logic for production resilience
+- Monitor stream pool health in `/status` during production traffic
+- Load test with concurrent iOS POST requests to validate round-robin pool behavior
+- Re-enable post-deploy app tagging job when API support lands
+- Consider adding stream reconnection logic if gRPC connections drop under sustained load
+- Investigate if Databricks Apps will support configurable SIGTERM timeout in future releases
