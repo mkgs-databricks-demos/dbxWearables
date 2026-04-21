@@ -159,9 +159,9 @@ function ArchitectureSection() {
     },
     {
       brandKey: null,
-      title: 'ZeroBus',
-      subtitle: 'Stream Bridge',
-      desc: 'Streams records into Unity Catalog bronze table with no external infrastructure. Decouples API from table writes.',
+      title: 'ZeroBus SDK',
+      subtitle: 'gRPC Stream Pool',
+      desc: 'Persistent gRPC stream pool writes records to Unity Catalog with offset-based durability. No Kafka, no external infrastructure.',
       logo: '/images/data-streaming-icon-full-color-container.svg',
       logoDark: '/images/data-streaming-icon-full-color-container.svg',
     },
@@ -252,26 +252,30 @@ function ZeroBusSection() {
         <div className="grid md:grid-cols-2 gap-8 mt-12">
           <div className="space-y-6">
             <p className="text-[var(--foreground)] leading-relaxed">
-              <strong>ZeroBus Ingest</strong> is a Databricks-native streaming
+              <strong>ZeroBus Ingest SDK</strong> is a Databricks-native streaming
               connector that lets applications write data directly into Unity
-              Catalog tables via a REST API — no Kafka, no Kinesis, no
+              Catalog tables via persistent gRPC streams — no Kafka, no Kinesis, no
               external message brokers required.
             </p>
             <p className="text-[var(--muted-foreground)] leading-relaxed">
-              The ZeroBus SDK runs inside this AppKit application. When the
-              iOS HealthKit app POSTs an NDJSON payload, the Express route
-              handler builds a typed record and calls the SDK&apos;s ingest
-              method. ZeroBus handles batching, delivery guarantees, and
-              writing to the target Delta table in Unity Catalog.
+              The ZeroBus SDK runs inside this AppKit application, maintaining
+              a pool of persistent gRPC connections to the ZeroBus Ingest server.
+              When the iOS app POSTs an NDJSON payload, the Express route handler
+              selects a stream from the pool (round-robin), writes each record via{' '}
+              <code className="bg-[var(--muted)] px-1 py-0.5 rounded text-xs">ingestRecordOffset()</code>,
+              and waits for the server acknowledgment before responding. The SDK handles
+              OAuth token refresh, automatic recovery on transient failures, and
+              graceful shutdown with zero data loss.
             </p>
 
             <div className="space-y-3 mt-6">
               {[
-                'No external infrastructure to manage',
-                'Direct write to Unity Catalog Delta tables',
-                'OAuth2 M2M authentication via service principal',
-                'Automatic batching and delivery guarantees',
-                'Schema-on-read with VARIANT column support',
+                'Persistent gRPC stream pool — no per-request HTTP overhead',
+                'Offset-based durability — response sent after server ack',
+                'SDK-managed OAuth2 with automatic token refresh',
+                'Automatic recovery — replays unacked batches on failure',
+                'Configurable pool size per environment (dev=2, prod=4+)',
+                'Schema-on-read with VARIANT column in Unity Catalog',
               ].map((item, i) => (
                 <div key={i} className="flex items-start gap-3">
                   <div className="mt-1 w-5 h-5 rounded-full bg-[var(--dbx-green-600)] flex items-center justify-center flex-shrink-0">
@@ -299,30 +303,26 @@ function ZeroBusSection() {
           </div>
 
           <div className="code-block text-sm">
-            <pre>{`// ZeroBus flow inside AppKit
-// server/routes/zerobus/ingest-routes.ts
+            <pre>{`// ZeroBus SDK streaming inside AppKit
+// server/services/zerobus-service.ts
 
-`}<span className="comment">// 1. iOS app POSTs NDJSON payload</span>{`
-POST /api/v1/healthkit/ingest
-`}<span className="header-name">Content-Type:</span>{` application/x-ndjson
-`}<span className="header-name">X-Record-Type:</span>{` samples
-
-`}<span className="comment">// 2. Express route parses NDJSON lines</span>{`
-`}<span className="keyword">const</span>{` { lines } = parseNdjson(rawBody);
-
-`}<span className="comment">// 3. Build typed records</span>{`
-`}<span className="keyword">const</span>{` records = lines.map(line =>
-  zeroBusService.buildRecord(
-    line, headers, recordType,
-    sourcePlatform, userId
-  )
+`}<span className="comment">// 1. Stream pool initialized lazily</span>{`
+`}<span className="comment">//    on first ingest request</span>{`
+`}<span className="keyword">const</span>{` pool = `}<span className="keyword">await</span>{` initStreamPool(
+  sdk, tableProps, poolSize
 );
 
-`}<span className="comment">// 4. ZeroBus SDK streams to bronze</span>{`
-`}<span className="keyword">await</span>{` zeroBusService.ingestRecords(records);
+`}<span className="comment">// 2. Round-robin stream selection</span>{`
+`}<span className="keyword">const</span>{` stream = pool[idx++ % pool.length];
 
-`}<span className="comment">// → Data lands in Unity Catalog table</span>{`
-`}<span className="comment">//   as VARIANT (schema-on-read)</span></pre>
+`}<span className="comment">// 3. Write record + get offset</span>{`
+`}<span className="keyword">const</span>{` offset = `}<span className="keyword">await</span>{`
+  stream.ingestRecordOffset(jsonString);
+
+`}<span className="comment">// 4. Wait for server acknowledgment</span>{`
+`}<span className="keyword">await</span>{` stream.waitForOffset(offset);
+`}<span className="comment">// → Durably committed to bronze table</span>{`
+`}<span className="comment">// → HTTP 200 sent to iOS client</span></pre>
           </div>
         </div>
       </div>

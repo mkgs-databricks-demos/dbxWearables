@@ -4,8 +4,8 @@
 #   1. ensure_service_principal — creates (or finds) a least-privilege SPN
 #      dedicated to this schema, populates the secret scope with the SPN's
 #      client_id (under the key named by client_id_dbs_key), workspace_url,
-#      zerobus_endpoint, and target_table_name, grants scope READ, and
-#      outputs the SPN's application_id as a task value.
+#      zerobus_endpoint, target_table_name, and zerobus_stream_pool_size,
+#      grants scope READ, and outputs the SPN's application_id as a task value.
 #   2. create_wearables_table — DDL + GRANT statements using the SPN from task 1.
 #
 # The client_secret must be provisioned separately by an admin via the
@@ -24,8 +24,9 @@ resources:
         Bootstraps the ZeroBus ingestion infrastructure. Task 1 ensures a
         least-privilege service principal (dbxw-zerobus-{schema}) exists,
         populates the secret scope with the SPN's client_id (under the
-        schema-qualified key name), workspace_url, zerobus_endpoint, and
-        target_table_name, and grants the SPN READ access to the scope.
+        schema-qualified key name), workspace_url, zerobus_endpoint,
+        target_table_name, and zerobus_stream_pool_size, and grants the
+        SPN READ access to the scope.
         Task 2 creates the wearables_zerobus bronze table (liquid clustering
         via CLUSTER BY AUTO) and grants USE CATALOG / USE SCHEMA / MODIFY /
         SELECT to the SPN. The client_secret must be provisioned by an admin
@@ -44,6 +45,8 @@ resources:
           default: ${var.client_id_dbs_key}
         - name: client_secret_dbs_key
           default: ${var.client_secret_dbs_key}
+        - name: zerobus_stream_pool_size
+          default: ${var.zerobus_stream_pool_size}
 
       tasks:
         # Task 1: Find or create the ZeroBus service principal

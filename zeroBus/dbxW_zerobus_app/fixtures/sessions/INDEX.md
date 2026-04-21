@@ -2,6 +2,7 @@
 
 | Date | Session | File |
 | --- | --- | --- |
+| 2026-04-21 | ZeroBus SDK Streaming Migration & Enterprise-Scale Architecture | [2026-04-21_zerobus-sdk-streaming-migration.md](2026-04-21_zerobus-sdk-streaming-migration.md) |
 | 2026-04-20 | Health Page Lakebase Check Fix & Details Grid Overflow | [2026-04-20_health-page-lakebase-fix.md](2026-04-20_health-page-lakebase-fix.md) |
 | 2026-04-20 | App Telemetry & OpenTelemetry Enablement | [2026-04-20_app-telemetry-otel-enablement.md](2026-04-20_app-telemetry-otel-enablement.md) |
 | 2026-04-18 | Bronze Schema Review & Permissive Ingestion Refactor | [2026-04-18_bronze-schema-review-permissive-ingestion.md](2026-04-18_bronze-schema-review-permissive-ingestion.md) |

@@ -35,7 +35,7 @@ The **dbxW ZeroBus — UC Setup** job (`resources/uc_setup.job.yml`) is a two-ta
 
 | Task | Notebook | What it does |
 | --- | --- | --- |
-| `ensure_service_principal` | `src/uc_setup/ensure-service-principal` (Python) | Creates or finds SPN `dbxw-zerobus-{schema}`, stores client ID (under schema-qualified key name) + derived values in secret scope, grants scope READ, checks for client secret |
+| `ensure_service_principal` | `src/uc_setup/ensure-service-principal` (Python) | Creates or finds SPN `dbxw-zerobus-{schema}`, stores client ID (under schema-qualified key name) + derived values in secret scope, provisions stream pool size, grants scope READ, checks for client secret |
 | `create_wearables_table` | `src/uc_setup/target-table-ddl` (SQL) | Creates the bronze table with liquid clustering, grants USE CATALOG / USE SCHEMA / MODIFY / SELECT to the SPN |
 
 The SPN's `application_id` is passed from task 1 to task 2 via a Databricks **task value**. The job is idempotent — safe to re-run at any time.
@@ -52,6 +52,7 @@ The `dbxw_zerobus_credentials` scope contains two categories of secrets. The cli
 | Workspace URL | `workspace_url` (fixed) | Derived from config | Databricks workspace URL |
 | ZeroBus endpoint | `zerobus_endpoint` (fixed) | Derived from workspace ID + region | ZeroBus Ingest server endpoint |
 | Target table name | `target_table_name` (fixed) | From job params | Fully qualified bronze table name |
+| Stream pool size | `zerobus_stream_pool_size` (fixed) | From job params | Number of concurrent gRPC streams in the SDK stream pool |
 
 **Admin-provisioned** (manual step required after first deploy):
 
@@ -169,6 +170,7 @@ Infrastructure resources must be deployed **first**, before any dependent bundle
    │  ✓ Secret scope: target_table_name        (auto-provisioned)
    │  ✓ Secret scope: {client_secret_dbs_key}   (admin-provisioned)
    │  ✓ Table: catalog.schema.wearables_zerobus
+   │  ✓ Secret scope: zerobus_stream_pool_size (auto-provisioned)
    │  ⚠ Lakebase Data API status               (info — warns only)
    └───────────────────────────────────────────
 7. dbxW_zerobus app bundle deploy             ← gated on hard checks passing

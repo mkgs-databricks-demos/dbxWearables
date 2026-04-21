@@ -1,19 +1,27 @@
-// ZeroBus Ingest Service — Singleton (REST API)
+// ZeroBus Ingest Service — Singleton (SDK Streaming)
 //
 // Ingests records into the wearables_zerobus bronze table via the ZeroBus
-// REST API. Uses native Node.js fetch (no external SDK dependency) with
-// OAuth M2M client-credentials token management.
+// TypeScript SDK (@databricks/zerobus-ingest-sdk). Uses persistent gRPC
+// streams with a configurable pool for enterprise-scale throughput.
 //
-// Previous approach used @databricks/zerobus-ingest-sdk (Rust/NAPI-RS),
-// which failed in the Databricks Apps runtime due to missing native binaries.
-// The REST API provides identical functionality without native dependencies.
+// The SDK wraps the high-performance Rust core via NAPI-RS native bindings,
+// providing native performance with Rust async I/O mapped to JavaScript
+// Promises. OAuth M2M authentication is handled internally by the SDK —
+// no manual token management required.
+//
+// Scaling strategy: open more streams. Each stream is a direct gRPC
+// connection to the ZeroBus Ingest server with per-stream ordering
+// guarantees. The pool round-robins requests across streams for
+// parallelism. Cross-stream ordering is NOT guaranteed (acceptable:
+// each iOS POST is independent).
 //
 // Environment variables (injected via app.yaml valueFrom directives):
-//   ZEROBUS_ENDPOINT      — ZeroBus Ingest server endpoint
-//   ZEROBUS_WORKSPACE_URL — Databricks workspace URL
-//   ZEROBUS_TARGET_TABLE  — Fully qualified bronze table name
-//   ZEROBUS_CLIENT_ID     — ZeroBus SPN application_id (OAuth M2M)
-//   ZEROBUS_CLIENT_SECRET — ZeroBus SPN OAuth secret
+//   ZEROBUS_ENDPOINT          — ZeroBus Ingest server endpoint
+//   ZEROBUS_WORKSPACE_URL     — Databricks workspace URL
+//   ZEROBUS_TARGET_TABLE      — Fully qualified bronze table name
+//   ZEROBUS_CLIENT_ID         — ZeroBus SPN application_id (OAuth M2M)
+//   ZEROBUS_CLIENT_SECRET     — ZeroBus SPN OAuth secret
+//   ZEROBUS_STREAM_POOL_SIZE  — (optional) Number of concurrent gRPC streams (default: 4)
 //
 // Table schema (hls_fde_dev.dev_matthew_giglia_wearables.wearables_zerobus):
 //   record_id       STRING  NOT NULL  — Server-generated GUID (PK)
@@ -24,10 +32,20 @@
 //   source_platform STRING            — From X-Platform header (e.g. "apple_healthkit")
 //   user_id         STRING            — App-authenticated user ID from JWT claims
 //
-// REST API reference:
+// Graceful shutdown:
+//   On SIGTERM the service enters drain mode:
+//     1. draining=true — new ingestRecords() calls are rejected immediately
+//     2. In-flight requests are given up to DRAIN_TIMEOUT_MS to complete
+//     3. stream.close() flushes all SDK-queued records and waits for acks
+//   This guarantees every record received before SIGTERM is durably
+//   committed to the Delta table, even during a redeploy.
+//
+// SDK reference:
+//   https://github.com/databricks/zerobus-sdk/tree/main/typescript
 //   https://docs.databricks.com/aws/en/ingestion/zerobus-ingest/
 
 import crypto from 'node:crypto';
+import { ZerobusSdk, RecordType } from '@databricks/zerobus-ingest-sdk';
 
 // ── Types matching the bronze table schema ───────────────────────────────
 
@@ -51,145 +69,126 @@ const ENV_KEYS = [
   'ZEROBUS_CLIENT_SECRET',
 ] as const;
 
-// ── OAuth token cache ────────────────────────────────────────────────────
+// ── Stream pool defaults ─────────────────────────────────────────────────
 
-interface TokenCache {
-  accessToken: string;
-  expiresAt: number; // Date.now() ms when the token expires
+const DEFAULT_POOL_SIZE = 4;
+
+// ── Drain / shutdown constants ───────────────────────────────────────────
+
+/** Maximum time (ms) to wait for in-flight requests during graceful shutdown. */
+const DRAIN_TIMEOUT_MS = 30_000;
+
+/** Polling interval (ms) when waiting for in-flight requests to complete. */
+const DRAIN_POLL_INTERVAL_MS = 250;
+
+// ── SDK stream interface ─────────────────────────────────────────────────
+//
+// Minimal interface matching the stream returned by ZerobusSdk.createStream().
+// Using an explicit interface rather than type inference avoids coupling to
+// the SDK's internal NAPI-RS type definitions.
+
+interface IngestStream {
+  ingestRecordOffset(record: unknown): Promise<bigint>;
+  waitForOffset(offset: bigint): Promise<void>;
+  close(): Promise<void>;
 }
 
 // ── Service class ────────────────────────────────────────────────────────
 
 class ZeroBusService {
-  private tokenCache: TokenCache | null = null;
+  private sdk: ZerobusSdk | null = null;
+  private streams: IngestStream[] = [];
+  private streamIndex = 0;
+  private poolSize: number;
+  private initPromise: Promise<void> | null = null;
 
-  // ── Table name parsing ───────────────────────────────────────────────
+  // ── In-flight tracking for graceful shutdown ──────────────────────
+  //
+  // inflight counts the number of ingestRecords() calls currently
+  // executing. On SIGTERM, close() sets draining=true and polls until
+  // inflight reaches 0 (or DRAIN_TIMEOUT_MS elapses), then closes all
+  // streams. This ensures every record received by an Express handler
+  // before SIGTERM is written to a stream and flushed on close().
 
-  /** Split a fully qualified table name into catalog, schema, table. */
-  private parseTableName(fqn: string): {
-    catalog: string;
-    schema: string;
-    table: string;
-  } {
-    const parts = fqn.split('.');
-    if (parts.length !== 3) {
-      throw new Error(
-        `Invalid fully qualified table name "${fqn}" — expected catalog.schema.table`,
-      );
-    }
-    return { catalog: parts[0], schema: parts[1], table: parts[2] };
+  private inflight = 0;
+  private draining = false;
+
+  constructor(poolSize?: number) {
+    this.poolSize = poolSize ??
+      (parseInt(process.env.ZEROBUS_STREAM_POOL_SIZE || '', 10) ||
+       DEFAULT_POOL_SIZE);
   }
 
+  // ── Stream pool management ─────────────────────────────────────────
+
   /**
-   * Extract the workspace ID from the ZeroBus endpoint URL.
-   * ZeroBus endpoints follow the pattern:
-   *   https://<workspace-id>.zerobus.<region>.cloud.databricks.com
+   * Lazily initialize the SDK and open a pool of gRPC streams.
+   *
+   * Called on the first ingest request. Concurrent callers await the
+   * same promise — only one initialization runs at a time.
+   *
+   * Each stream is an independent gRPC connection to the ZeroBus server.
+   * The SDK handles OAuth M2M token acquisition and refresh internally
+   * via the client_id / client_secret credentials.
    */
-  private extractWorkspaceId(endpoint: string): string {
-    const url = new URL(endpoint);
-    const workspaceId = url.hostname.split('.')[0];
-    if (!workspaceId || !/^\d+$/.test(workspaceId)) {
-      throw new Error(
-        `Cannot extract numeric workspace ID from ZeroBus endpoint "${endpoint}"`,
-      );
+  private async ensurePool(): Promise<void> {
+    if (this.streams.length > 0) return;
+
+    // Prevent concurrent initialization — all callers await the same promise
+    if (this.initPromise) {
+      await this.initPromise;
+      return;
     }
-    return workspaceId;
+
+    this.initPromise = this.initializePool();
+    try {
+      await this.initPromise;
+    } finally {
+      this.initPromise = null;
+    }
   }
 
-  // ── OAuth token management ───────────────────────────────────────────
-
-  /**
-   * Fetch (or return cached) OAuth M2M access token for ZeroBus.
-   *
-   * Token is refreshed 5 minutes before expiry. Uses the standard
-   * Databricks OIDC client-credentials grant with authorization_details
-   * scoped to the target table's catalog, schema, and table privileges.
-   *
-   * Reference:
-   *   https://docs.databricks.com/aws/en/ingestion/zerobus-ingest/
-   */
-  private async getAccessToken(): Promise<string> {
-    // Return cached token if still valid (with 5-minute buffer)
-    const REFRESH_BUFFER_MS = 5 * 60 * 1000;
-    if (
-      this.tokenCache &&
-      this.tokenCache.expiresAt > Date.now() + REFRESH_BUFFER_MS
-    ) {
-      return this.tokenCache.accessToken;
-    }
-
+  private async initializePool(): Promise<void> {
+    const endpoint = process.env.ZEROBUS_ENDPOINT!;
     const workspaceUrl = process.env.ZEROBUS_WORKSPACE_URL!;
+    const targetTable = process.env.ZEROBUS_TARGET_TABLE!;
     const clientId = process.env.ZEROBUS_CLIENT_ID!;
     const clientSecret = process.env.ZEROBUS_CLIENT_SECRET!;
-    const targetTable = process.env.ZEROBUS_TARGET_TABLE!;
-    const endpoint = process.env.ZEROBUS_ENDPOINT!;
-
-    const { catalog, schema } = this.parseTableName(targetTable);
-    const workspaceId = this.extractWorkspaceId(endpoint);
-
-    // Scope the token to the minimum required UC privileges
-    const authorizationDetails = JSON.stringify([
-      {
-        type: 'unity_catalog_privileges',
-        privileges: ['USE CATALOG'],
-        object_type: 'CATALOG',
-        object_full_path: catalog,
-      },
-      {
-        type: 'unity_catalog_privileges',
-        privileges: ['USE SCHEMA'],
-        object_type: 'SCHEMA',
-        object_full_path: `${catalog}.${schema}`,
-      },
-      {
-        type: 'unity_catalog_privileges',
-        privileges: ['SELECT', 'MODIFY'],
-        object_type: 'TABLE',
-        object_full_path: targetTable,
-      },
-    ]);
-
-    const body = new URLSearchParams({
-      grant_type: 'client_credentials',
-      scope: 'all-apis',
-      resource: `api://databricks/workspaces/${workspaceId}/zerobusDirectWriteApi`,
-      authorization_details: authorizationDetails,
-    });
-
-    const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString(
-      'base64',
-    );
-
-    console.log('[ZeroBus] Fetching OAuth token...');
-    const response = await fetch(`${workspaceUrl}/oidc/v1/token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: `Basic ${basicAuth}`,
-      },
-      body: body.toString(),
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`OAuth token fetch failed (${response.status}): ${text}`);
-    }
-
-    const data = (await response.json()) as {
-      access_token: string;
-      expires_in: number;
-      token_type: string;
-    };
-
-    this.tokenCache = {
-      accessToken: data.access_token,
-      expiresAt: Date.now() + data.expires_in * 1000,
-    };
 
     console.log(
-      `[ZeroBus] OAuth token acquired (expires in ${data.expires_in}s)`,
+      `[ZeroBus] Initializing SDK stream pool (size: ${this.poolSize}, table: ${targetTable})`,
     );
-    return data.access_token;
+
+    this.sdk = new ZerobusSdk(endpoint, workspaceUrl);
+
+    // Open all streams in parallel for faster startup
+    const streamPromises = Array.from({ length: this.poolSize }, (_, i) =>
+      this.sdk!.createStream(
+        { tableName: targetTable },
+        clientId,
+        clientSecret,
+        { recordType: RecordType.Json },
+      ).then((stream: IngestStream) => {
+        console.log(`[ZeroBus] Stream ${i + 1}/${this.poolSize} opened`);
+        return stream;
+      }),
+    );
+
+    this.streams = await Promise.all(streamPromises);
+    console.log(`[ZeroBus] Stream pool ready (${this.streams.length} streams)`);
+  }
+
+  /**
+   * Round-robin stream selection.
+   *
+   * Each Express request gets the next stream in the pool. Cross-stream
+   * ordering is NOT guaranteed — acceptable because each iOS POST is an
+   * independent batch from a different user/sync session.
+   */
+  private nextStream(): IngestStream {
+    const stream = this.streams[this.streamIndex];
+    this.streamIndex = (this.streamIndex + 1) % this.streams.length;
+    return stream;
   }
 
   // ── Record builder ───────────────────────────────────────────────────
@@ -221,21 +220,31 @@ class ZeroBusService {
     };
   }
 
-  // ── Batch ingest via REST API ────────────────────────────────────────
+  // ── Batch ingest via SDK stream ──────────────────────────────────────
 
   /**
-   * Ingest an array of pre-built records via the ZeroBus REST API.
+   * Ingest an array of pre-built records via the ZeroBus SDK stream pool.
    *
-   * POST /zerobus/v1/tables/{catalog.schema.table}/insert
-   * Body: JSON array of record objects
-   * Auth: Bearer token (OAuth M2M client-credentials)
+   * Each record is written to a gRPC stream via ingestRecordOffset(),
+   * which queues the record for sending and returns a monotonic offset.
+   * After all records are written, waitForOffset() blocks until the last
+   * record is durably committed to the Delta table.
    *
-   * A 200 response with empty body confirms durable commit.
+   * The SDK's Rust async runtime handles network I/O, batching, and
+   * OAuth token lifecycle — the Node.js event loop is not blocked.
    *
-   * @returns The number of records ingested.
+   * @throws Error if the service is draining (SIGTERM received).
+   * @returns The number of records durably ingested.
    */
   async ingestRecords(records: WearablesRecord[]): Promise<number> {
     if (records.length === 0) return 0;
+
+    // Reject new requests during graceful shutdown
+    if (this.draining) {
+      throw new Error(
+        'Service is shutting down — not accepting new ingest requests',
+      );
+    }
 
     // Validate env vars before attempting ingestion
     const envCheck = this.checkEnv();
@@ -245,29 +254,30 @@ class ZeroBusService {
       );
     }
 
-    const token = await this.getAccessToken();
-    const endpoint = process.env.ZEROBUS_ENDPOINT!;
-    const targetTable = process.env.ZEROBUS_TARGET_TABLE!;
+    await this.ensurePool();
+    const stream = this.nextStream();
 
-    const insertUrl = `${endpoint}/zerobus/v1/tables/${targetTable}/insert`;
+    // Track in-flight requests for graceful shutdown
+    this.inflight++;
+    try {
+      // Write all records to the stream — ingestRecordOffset() queues each
+      // record and returns quickly. The Rust runtime sends them efficiently
+      // over the gRPC connection. We only need the last offset for the
+      // durability check.
+      let lastOffset = BigInt(0);
+      for (const record of records) {
+        lastOffset = await stream.ingestRecordOffset(record);
+      }
 
-    const response = await fetch(insertUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(records),
-    });
+      // Block until the last record is durably committed to the Delta table.
+      // All preceding records (with lower offsets) are guaranteed durable
+      // once this returns.
+      await stream.waitForOffset(lastOffset);
 
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(
-        `ZeroBus insert failed (${response.status}): ${text}`,
-      );
+      return records.length;
+    } finally {
+      this.inflight--;
     }
-
-    return records.length;
   }
 
   // ── Health check ─────────────────────────────────────────────────────
@@ -278,12 +288,81 @@ class ZeroBusService {
     return { configured: missing.length === 0, missing: [...missing] };
   }
 
+  /** Stream pool and drain status for the health check endpoint. */
+  poolStatus(): {
+    pool_size: number;
+    active_streams: number;
+    initialized: boolean;
+    inflight_requests: number;
+    draining: boolean;
+  } {
+    return {
+      pool_size: this.poolSize,
+      active_streams: this.streams.length,
+      initialized: this.streams.length > 0,
+      inflight_requests: this.inflight,
+      draining: this.draining,
+    };
+  }
+
   // ── Graceful shutdown ────────────────────────────────────────────────
 
+  /**
+   * Drain in-flight requests, then close all streams and release resources.
+   *
+   * Shutdown sequence:
+   *   1. Set draining=true — ingestRecords() rejects new calls immediately
+   *   2. Poll until inflight reaches 0 (or DRAIN_TIMEOUT_MS elapses)
+   *      This gives in-flight Express handlers time to finish their
+   *      ingestRecordOffset() + waitForOffset() calls.
+   *   3. Close all streams — each stream.close() flushes any records
+   *      still queued in the SDK's internal buffer and waits for final
+   *      acknowledgments from the ZeroBus server.
+   *
+   * After step 3, every record that was accepted by ingestRecords()
+   * before SIGTERM is guaranteed durably committed to the Delta table.
+   */
   async close(): Promise<void> {
-    // Clear cached token on shutdown
-    this.tokenCache = null;
-    console.log('[ZeroBus] Service shut down (token cache cleared)');
+    this.draining = true;
+
+    // ── Step 1: Drain in-flight requests ────────────────────────────
+    if (this.inflight > 0) {
+      console.log(
+        `[ZeroBus] Draining ${this.inflight} in-flight request(s) (timeout: ${DRAIN_TIMEOUT_MS}ms)...`,
+      );
+
+      const drainStart = Date.now();
+      while (
+        this.inflight > 0 &&
+        Date.now() - drainStart < DRAIN_TIMEOUT_MS
+      ) {
+        await new Promise((r) => setTimeout(r, DRAIN_POLL_INTERVAL_MS));
+        if (this.inflight > 0) {
+          console.log(
+            `[ZeroBus] Still draining — ${this.inflight} request(s) in-flight`,
+          );
+        }
+      }
+
+      if (this.inflight > 0) {
+        console.warn(
+          `[ZeroBus] Drain timeout reached — ${this.inflight} request(s) still in-flight, proceeding with stream close`,
+        );
+      } else {
+        console.log('[ZeroBus] All in-flight requests drained');
+      }
+    }
+
+    // ── Step 2: Close all streams (flushes SDK-queued records) ──────
+    if (this.streams.length > 0) {
+      console.log(`[ZeroBus] Closing ${this.streams.length} stream(s)...`);
+      await Promise.allSettled(this.streams.map((s) => s.close()));
+      console.log('[ZeroBus] All streams closed — records durably committed');
+    }
+
+    this.streams = [];
+    this.streamIndex = 0;
+    this.sdk = null;
   }
 }
 

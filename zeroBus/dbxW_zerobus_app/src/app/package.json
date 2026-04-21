@@ -20,7 +20,8 @@
     "test:e2e:ui": "playwright test --ui",
     "test:smoke": "playwright install chromium && playwright test tests/smoke.spec.ts",
     "clean": "rm -rf client/dist dist build node_modules .smoke-test test-results playwright-report",
-    "postinstall": "npm run typegen",
+    "postinstall": "npm run typegen && npm run patch:zerobus-sdk",
+    "patch:zerobus-sdk": "node scripts/patch-zerobus-sdk.mjs",
     "prebuild": "npm run sync && npm run typegen",
     "predev": "npm run sync && npm run typegen",
     "sync": "appkit plugin sync --write --silent",
@@ -35,6 +36,7 @@
     "@databricks/appkit": "0.20.3",
     "@databricks/appkit-ui": "0.20.3",
     "@databricks/sdk-experimental": "^0.14.2",
+    "@databricks/zerobus-ingest-sdk": "*",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/auto-instrumentations-node": "^0.67.3",
     "@opentelemetry/exporter-logs-otlp-proto": "^0.203.0",
@@ -87,6 +89,7 @@
     "vitest": "^4.0.14"
   },
   "overrides": {
-    "vite": "npm:rolldown-vite@7.1.14"
+    "vite": "npm:rolldown-vite@7.1.14",
+    "apache-arrow": "^21.1.0"
   }
 }

@@ -93,6 +93,24 @@ variables:
       Use a prefix to avoid collisions if multiple apps share the same schema.
     default: dbxw_0bus_ingest
 
+  # ZeroBus SDK stream pool — controls the number of concurrent gRPC streams
+  # opened to the ZeroBus Ingest server. More streams = higher throughput.
+  # Each stream is an independent connection with per-stream ordering
+  # guarantees. Cross-stream ordering is NOT guaranteed (acceptable: each
+  # iOS POST is an independent batch).
+  #
+  # Value is stored in the secret scope (key: zerobus_stream_pool_size) and
+  # injected as ZEROBUS_STREAM_POOL_SIZE env var via the app resource.
+  # Populate via: databricks secrets put-secret \
+  #   --scope dbxw_zerobus_credentials --key zerobus_stream_pool_size \
+  #   --string-value "<value>"
+  zerobus_stream_pool_size:
+    description: >
+      Number of concurrent gRPC streams in the ZeroBus SDK stream pool.
+      More streams = higher throughput at the cost of more connections.
+      The service falls back to 4 if the env var is unset.
+    default: "4"
+
   # Tags — applied to all deployed resources via presets
   tags_project:
     default: dbxWearables ZeroBus
@@ -141,6 +159,7 @@ targets:
       client_secret_dbs_key: client_secret_${var.schema}
       postgres_branch: projects/dbxw-zerobus-wearables/branches/production
       postgres_database: projects/dbxw-zerobus-wearables/branches/production/databases/db-0k31-aj7nvq8pgr
+      zerobus_stream_pool_size: "2"
 
   # ── hls_fde (production — same workspace as dev) ────────────────────────
   hls_fde:

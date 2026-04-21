@@ -70,6 +70,12 @@ variables:
   client_secret_dbs_key:
     description: The key name for the ZeroBus OAuth2 M2M client secret in the secret scope.
     default: client_secret
+  zerobus_stream_pool_size:
+    description: >
+      Number of concurrent gRPC streams in the ZeroBus SDK stream pool.
+      Stored in the secret scope by the UC setup job. The app bundle reads
+      it via ZEROBUS_STREAM_POOL_SIZE env var. The app defaults to 4 if unset.
+    default: "4"
   run_as_user:
     description: The user or service principal that workflows should run as.
   higher_level_service_principal:
@@ -131,6 +137,7 @@ targets:
       run_as_user: matthew.giglia@databricks.com
       client_id_dbs_key: client_id_dev_matthew_giglia_${var.schema}
       client_secret_dbs_key: client_secret_dev_matthew_giglia_${var.schema}
+      zerobus_stream_pool_size: "2"
 
   # ── hls_fde (production — same workspace as dev) ────────────────────────
   hls_fde:
