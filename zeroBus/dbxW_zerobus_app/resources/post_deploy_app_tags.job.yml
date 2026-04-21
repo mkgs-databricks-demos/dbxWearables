@@ -13,7 +13,7 @@
 resources:
   jobs:
     post_deploy_app_tags:
-      name: "[${bundle.target}] dbxW Post-Deploy App Tags"
+      name: "dbxW Post-Deploy App Tags"
       description: >
         Applies bundle preset tags to the Databricks App after deployment.
         The DABs app resource YAML does not support tags natively, so this
