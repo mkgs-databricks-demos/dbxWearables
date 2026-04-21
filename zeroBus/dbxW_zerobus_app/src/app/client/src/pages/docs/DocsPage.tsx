@@ -10,11 +10,11 @@ import {
 } from 'lucide-react';
 import { BrandIcon } from '@/components/BrandIcon';
 
-/* ═════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════════
    DocsPage — API Documentation (Swagger-style)
    Interactive docs for POST /api/v1/healthkit/ingest and
    GET /api/v1/healthkit/health
-   ═════════════════════════════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════════════════════ */
 
 export function DocsPage() {
   return (
@@ -57,7 +57,7 @@ export function DocsPage() {
 }
 
 
-/* ── Streaming Architecture Panel ─────────────────────────────────────── */
+/* ── Streaming Architecture Panel ─────────────────────────────────── */
 function StreamingArchitecture() {
   const [expanded, setExpanded] = useState(false);
 
@@ -182,8 +182,8 @@ function StreamingArchitecture() {
           {/* Current limitations */}
           <div>
             <h3 className="font-bold text-[var(--foreground)] mb-3 flex items-center gap-2">
-              <AlertCircle className="h-4 w-4 text-amber-500" />
-              Current Limitations &amp; Known Issues
+              <AlertCircle className="h-4 w-4 text-blue-500" />
+              Current Limitations
             </h3>
             <p className="text-sm text-[var(--muted-foreground)] leading-relaxed mb-3">
               Full transparency on the current state of the SDK integration:
@@ -191,10 +191,10 @@ function StreamingArchitecture() {
             <div className="space-y-3">
               {[
                 {
-                  severity: 'Workaround',
-                  severityColor: 'bg-amber-50 text-amber-600',
-                  title: 'SDK v1.0.0 packaging bug — NAPI-RS patch required',
-                  desc: 'The published npm tarball is missing index.js (the JS entry point for the native Rust binary). We vendor locally-built files and apply them via a postinstall script. This is transparent at runtime but requires a one-time local Rust build. See patches/zerobus-ingest-sdk/README.md.',
+                  severity: 'Info',
+                  severityColor: 'bg-blue-50 text-blue-600',
+                  title: 'Local build required for ZeroBus TypeScript SDK',
+                  desc: <span>The current ZeroBus SDK for TypeScript requires a local build when initializing an AppKit project or iterating in local development. This is transparent at runtime once built. See the <a href="https://github.com/databricks/zerobus-sdk/tree/main/typescript" target="_blank" rel="noopener noreferrer" className="text-[var(--dbx-lava-600)] hover:underline font-medium">official ZeroBus SDK GitHub</a> for installation details.</span>,
                 },
                 {
                   severity: 'Info',
@@ -234,7 +234,7 @@ function StreamingArchitecture() {
   );
 }
 
-/* ── POST /api/v1/healthkit/ingest ────────────────────────────────────── */
+/* ── POST /api/v1/healthkit/ingest ────────────────────────────────── */
 function IngestEndpoint() {
   const [expanded, setExpanded] = useState(false);
   const [tryItOpen, setTryItOpen] = useState(false);
@@ -378,7 +378,7 @@ function IngestEndpoint() {
   );
 }
 
-/* ── GET /api/v1/healthkit/health ─────────────────────────────────────── */
+/* ── GET /api/v1/healthkit/health ─────────────────────────────────── */
 function HealthEndpoint() {
   const [expanded, setExpanded] = useState(false);
 
@@ -426,7 +426,7 @@ function HealthEndpoint() {
                     ['active_streams', 'number', 'Streams currently connected to the ZeroBus Ingest server'],
                     ['initialized', 'boolean', 'Whether the pool has been created (false until first ingest request)'],
                     ['inflight_requests', 'number', 'HTTP requests currently being processed through the pool'],
-                    ['draining', 'boolean', 'True during graceful shutdown — no new requests accepted'],
+                    ['draining', 'boolean', 'True during graceful shutdown \u2014 no new requests accepted'],
                   ].map(([field, type, desc], i) => (
                     <tr key={i} className="hover:bg-[var(--muted)]/50">
                       <td className="py-2 px-4 font-mono text-xs text-[var(--dbx-lava-500)]">
@@ -521,7 +521,7 @@ function HealthEndpoint() {
   );
 }
 
-/* ── Try It Panel ───────────────────────────────────────────────────── */
+/* ── Try It Panel ───────────────────────────────────────────────── */
 function TryItPanel() {
   const [recordType, setRecordType] = useState('samples');
   const [body, setBody] = useState(
@@ -618,7 +618,7 @@ function TryItPanel() {
   );
 }
 
-/* ── Record Types Reference ─────────────────────────────────────────── */
+/* ── Record Types Reference ───────────────────────────────────────── */
 function RecordTypesRef() {
   return (
     <div className="mt-12">
@@ -657,7 +657,7 @@ function RecordTypesRef() {
   );
 }
 
-/* ── Error Codes Reference ──────────────────────────────────────────── */
+/* ── Error Codes Reference ────────────────────────────────────────── */
 function ErrorCodesRef() {
   return (
     <div className="mt-10">
@@ -697,7 +697,7 @@ function ErrorCodesRef() {
   );
 }
 
-/* ── Shared components ────────────────────────────────────────────────── */
+/* ── Shared components ────────────────────────────────────────────── */
 function RequiredBadge() {
   return <span className="text-xs font-medium px-2 py-0.5 rounded bg-red-50 text-red-600">required</span>;
 }
