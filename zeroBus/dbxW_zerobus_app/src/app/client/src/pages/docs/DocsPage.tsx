@@ -38,6 +38,9 @@ export function DocsPage() {
         </div>
       </div>
 
+      {/* Streaming Architecture */}
+      <StreamingArchitecture />
+
       {/* Endpoints */}
       <div className="space-y-6">
         <IngestEndpoint />
@@ -49,6 +52,184 @@ export function DocsPage() {
 
       {/* Error codes */}
       <ErrorCodesRef />
+    </div>
+  );
+}
+
+
+/* ── Streaming Architecture Panel ─────────────────────────────────── */
+function StreamingArchitecture() {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="mb-8">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full bg-[var(--dbx-navy-800)] text-white rounded-xl p-6 text-left hover:bg-[var(--dbx-navy-800)]/90 transition-colors"
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <BrandIcon name="spark-streaming" className="h-7 w-7" />
+            <div>
+              <h2 className="text-lg font-bold">Streaming Architecture</h2>
+              <p className="text-sm text-gray-400 mt-0.5">
+                ZeroBus Ingest SDK — persistent gRPC stream pool for enterprise-scale throughput
+              </p>
+            </div>
+          </div>
+          {expanded ? <ChevronDown className="h-5 w-5 text-gray-400" /> : <ChevronRight className="h-5 w-5 text-gray-400" />}
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="bg-[var(--card)] border border-[var(--border)] border-t-0 rounded-b-xl p-6 space-y-8 -mt-3 pt-8">
+
+          {/* How it works */}
+          <div>
+            <h3 className="font-bold text-[var(--foreground)] mb-3 flex items-center gap-2">
+              <BrandIcon name="data-flow" className="h-4 w-4" />
+              How It Works
+            </h3>
+            <p className="text-sm text-[var(--muted-foreground)] leading-relaxed mb-4">
+              This gateway uses the{' '}
+              <a href="https://github.com/databricks/zerobus-sdk" target="_blank" rel="noopener noreferrer"
+                className="text-[var(--dbx-lava-600)] hover:underline font-medium">
+                ZeroBus Ingest SDK
+              </a>{' '}
+              (<code className="bg-[var(--muted)] px-1.5 py-0.5 rounded text-xs font-mono">@databricks/zerobus-ingest-sdk</code>)
+              to maintain a pool of persistent gRPC streams to the ZeroBus Ingest server. When your iOS app
+              POSTs an NDJSON payload to this REST API, the server writes each record through the stream pool —
+              no per-request HTTP calls to Databricks. Records are durably committed to the Unity Catalog
+              bronze table with offset-based acknowledgments.
+            </p>
+
+            <div className="grid sm:grid-cols-2 gap-4">
+              {[
+                {
+                  title: 'REST API (what you call)',
+                  items: [
+                    'Standard HTTP POST with NDJSON body',
+                    'X-Record-Type header for routing',
+                    'Synchronous response with record IDs',
+                    'Works with any HTTP client (curl, iOS, etc.)',
+                  ],
+                },
+                {
+                  title: 'SDK Stream Pool (what happens inside)',
+                  items: [
+                    'N persistent gRPC streams (configurable)',
+                    'Round-robin stream selection per request',
+                    'SDK-managed OAuth token refresh',
+                    'Offset-based durability (waitForOffset)',
+                  ],
+                },
+              ].map((col) => (
+                <div key={col.title} className="bg-[var(--muted)] rounded-lg p-4">
+                  <h4 className="text-xs font-bold text-[var(--foreground)] uppercase tracking-wider mb-3">{col.title}</h4>
+                  <ul className="space-y-2">
+                    {col.items.map((item, i) => (
+                      <li key={i} className="flex items-start gap-2 text-xs text-[var(--muted-foreground)]">
+                        <div className="mt-1 w-1.5 h-1.5 rounded-full bg-[var(--dbx-green-600)] flex-shrink-0" />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Enterprise scaling */}
+          <div>
+            <h3 className="font-bold text-[var(--foreground)] mb-3 flex items-center gap-2">
+              <BrandIcon name="spark-streaming" className="h-4 w-4" />
+              Enterprise Scaling
+            </h3>
+            <p className="text-sm text-[var(--muted-foreground)] leading-relaxed mb-4">
+              The stream pool architecture is designed for millions of concurrent iOS users.
+              Each gRPC stream handles many records per second with automatic batching and
+              flow control. Scaling strategy: increase the pool size to open more connections.
+            </p>
+
+            <div className="border border-[var(--border)] rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-[var(--muted)]">
+                  <tr>
+                    <th className="text-left py-2 px-4 font-medium text-[var(--muted-foreground)]">Config</th>
+                    <th className="text-left py-2 px-4 font-medium text-[var(--muted-foreground)]">Value</th>
+                    <th className="text-left py-2 px-4 font-medium text-[var(--muted-foreground)]">Description</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border)]">
+                  {[
+                    ['Pool Size', 'ZEROBUS_STREAM_POOL_SIZE', 'Number of concurrent gRPC streams (dev=2, prod=4+)'],
+                    ['Recovery', 'Automatic', 'SDK reconnects and replays unacked batches on transient failures'],
+                    ['Durability', 'Offset-based', 'HTTP response sent only after server acknowledges the record'],
+                    ['Auth', 'SDK-managed OAuth', 'M2M client credentials with automatic token refresh'],
+                    ['Shutdown', '3-phase graceful', 'Drain gate \u2192 in-flight timeout \u2192 stream flush + close'],
+                  ].map(([config, value, desc], i) => (
+                    <tr key={i} className="hover:bg-[var(--muted)]/50">
+                      <td className="py-2.5 px-4 text-xs font-medium text-[var(--foreground)]">{config}</td>
+                      <td className="py-2.5 px-4 font-mono text-xs text-[var(--dbx-lava-500)]">{value}</td>
+                      <td className="py-2.5 px-4 text-xs text-[var(--muted-foreground)]">{desc}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Current limitations */}
+          <div>
+            <h3 className="font-bold text-[var(--foreground)] mb-3 flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 text-amber-500" />
+              Current Limitations &amp; Known Issues
+            </h3>
+            <p className="text-sm text-[var(--muted-foreground)] leading-relaxed mb-3">
+              Full transparency on the current state of the SDK integration:
+            </p>
+            <div className="space-y-3">
+              {[
+                {
+                  severity: 'Workaround',
+                  severityColor: 'bg-amber-50 text-amber-600',
+                  title: 'SDK v1.0.0 packaging bug — NAPI-RS patch required',
+                  desc: 'The published npm tarball is missing index.js (the JS entry point for the native Rust binary). We vendor locally-built files and apply them via a postinstall script. This is transparent at runtime but requires a one-time local Rust build. See patches/zerobus-ingest-sdk/README.md.',
+                },
+                {
+                  severity: 'Info',
+                  severityColor: 'bg-blue-50 text-blue-600',
+                  title: 'Cross-stream ordering not guaranteed',
+                  desc: 'Each gRPC stream has independent ordering. Records from different HTTP requests may arrive in different order in the bronze table. This is acceptable because each iOS POST is an independent batch — ordering within a batch IS preserved.',
+                },
+                {
+                  severity: 'Info',
+                  severityColor: 'bg-blue-50 text-blue-600',
+                  title: 'Lazy pool initialization',
+                  desc: 'The stream pool is created on the first ingest request, not at server startup. This means the first request takes ~900ms (pool creation + gRPC handshakes). Subsequent requests are 100-200ms.',
+                },
+                {
+                  severity: 'Planned',
+                  severityColor: 'bg-gray-100 text-gray-500',
+                  title: 'No dynamic pool scaling',
+                  desc: 'Pool size is fixed at startup via ZEROBUS_STREAM_POOL_SIZE. Dynamic scaling based on request load is not yet implemented.',
+                },
+              ].map((item, i) => (
+                <div key={i} className="flex items-start gap-3 bg-[var(--muted)] rounded-lg p-4">
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded flex-shrink-0 mt-0.5 ${item.severityColor}`}>
+                    {item.severity}
+                  </span>
+                  <div>
+                    <h4 className="text-sm font-medium text-[var(--foreground)]">{item.title}</h4>
+                    <p className="text-xs text-[var(--muted-foreground)] mt-1 leading-relaxed">{item.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+        </div>
+      )}
     </div>
   );
 }
@@ -79,7 +260,7 @@ function IngestEndpoint() {
         <div className="border-t border-[var(--border)] p-6 space-y-6">
           <p className="text-sm text-[var(--muted-foreground)] leading-relaxed">
             Receives NDJSON (Newline Delimited JSON) payloads from the iOS HealthKit app
-            and streams each record to the Unity Catalog bronze table via the ZeroBus REST API.
+            and streams each record to the Unity Catalog bronze table via the ZeroBus Ingest SDK\'s persistent gRPC stream pool.
             Each line in the NDJSON body becomes a separate record in the bronze table.
           </p>
 
@@ -232,7 +413,12 @@ function HealthEndpoint() {
   "status": "ok",
   "service": "zerobus-healthkit-ingest",
   "env_configured": true,
-  "target_table": "hls_fde.wearables.wearables_zerobus"
+  "target_table": "hls_fde.wearables.wearables_zerobus",
+  "stream_pool": {
+    "size": 2,
+    "status": "ready",
+    "active_streams": 2
+  }
 }`}
             />
           </div>
@@ -422,7 +608,7 @@ function ErrorCodesRef() {
               ['400', 'Missing X-Record-Type header', 'Missing X-Record-Type header. Provide any non-empty string...'],
               ['400', 'Empty request body', 'Request body is empty. Expected NDJSON...'],
               ['400', 'No valid JSON lines', 'No valid records found. Parse errors: Line 1: invalid JSON'],
-              ['500', 'ZeroBus SDK failure', 'Ingestion failed: stream write error'],
+              ['500', 'ZeroBus SDK stream failure', 'Ingestion failed: stream write error — SDK will attempt automatic recovery'],
             ].map(([code, condition, msg], i) => (
               <tr key={i} className="hover:bg-[var(--muted)]/50">
                 <td className="py-3 px-4">
