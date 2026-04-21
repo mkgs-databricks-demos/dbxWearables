@@ -126,6 +126,8 @@ export interface ResizeEvent {
   peakInflight?: number;
   /** Consecutive idle checks at the time (auto-scale down only) */
   idleChecks?: number;
+  /** ingestRecords() calls since last check (auto-scale up — call rate trigger) */
+  callRate?: number;
 }
 
 /** Maximum number of resize events to retain in the ring buffer. */
@@ -179,10 +181,12 @@ class ZeroBusService {
   private lastAutoScaleTime = 0;
   private peakInflight = 0;
   private idleChecks = 0;
+  private callsSinceLastCheck = 0;
   private resizeHistory: ResizeEvent[] = [];
   private _lastResizeTrigger: ResizeEvent['trigger'] | null = null;
   private _lastResizePeak?: number;
   private _lastResizeIdle?: number;
+  private _lastResizeCallRate?: number;
 
   constructor(poolSize?: number) {
     this.poolSize = poolSize ??
@@ -391,10 +395,12 @@ class ZeroBusService {
       durationMs,
       peakInflight: this._lastResizePeak,
       idleChecks: this._lastResizeIdle,
+      callRate: this._lastResizeCallRate,
     });
     this._lastResizeTrigger = null;
     this._lastResizePeak = undefined;
     this._lastResizeIdle = undefined;
+    this._lastResizeCallRate = undefined;
 
     return { oldSize, newSize, durationMs };
   }
@@ -468,6 +474,7 @@ class ZeroBusService {
     // Track in-flight requests for graceful shutdown
     this.inflight++;
     if (this.inflight > this.peakInflight) this.peakInflight = this.inflight;
+    this.callsSinceLastCheck++;
     try {
       // Write all records to the stream — ingestRecordOffset() queues each
       // record and returns quickly. The Rust runtime sends them efficiently
@@ -509,6 +516,7 @@ class ZeroBusService {
     this.lastAutoScaleTime = 0;
     this.peakInflight = 0;
     this.idleChecks = 0;
+    this.callsSinceLastCheck = 0;
 
     // Clear any existing timer before starting a new one
     if (this.autoScaleTimer) clearInterval(this.autoScaleTimer);
@@ -561,38 +569,63 @@ class ZeroBusService {
     }
 
     const now = Date.now();
-    if (now - this.lastAutoScaleTime < this.autoScaleConfig.cooldownMs) return;
+    const cooldownElapsed =
+      now - this.lastAutoScaleTime >= this.autoScaleConfig.cooldownMs;
 
+    // Capture and reset interval metrics
     const currentInflight = this.inflight;
     const peak = Math.max(this.peakInflight, currentInflight);
+    const callRate = this.callsSinceLastCheck;
     this.peakInflight = currentInflight; // reset for next interval
+    this.callsSinceLastCheck = 0;
 
     const streamCount = this.streams.length;
     const config = this.autoScaleConfig;
 
-    if (peak >= streamCount && streamCount < config.maxSize) {
-      // All streams saturated — scale up
+    // ── Scale-up decision ──────────────────────────────────────
+    // Two independent triggers (either can fire):
+    //   1. Concurrent saturation: peak in-flight ≥ stream count
+    //      (multiple callers saturating all streams simultaneously)
+    //   2. High call rate: ingestRecords() called ≥ stream count
+    //      times since last check (sequential-but-heavy usage, e.g.
+    //      load test batches or rapid iOS syncs in sequence)
+    const concurrentSaturated = peak >= streamCount;
+    const highCallRate = callRate >= streamCount;
+
+    if (
+      (concurrentSaturated || highCallRate) &&
+      streamCount < config.maxSize &&
+      cooldownElapsed
+    ) {
       const newSize = Math.min(
         streamCount + config.scaleUpStep,
         config.maxSize,
       );
+      const reason = concurrentSaturated
+        ? `peak ${peak} in-flight ≥ ${streamCount} streams`
+        : `${callRate} calls in interval ≥ ${streamCount} streams`;
       console.log(
-        `[ZeroBus/AutoScale] Peak ${peak} in-flight ≥ ${streamCount} streams — scaling UP: ${streamCount} → ${newSize}`,
+        `[ZeroBus/AutoScale] ${reason} — scaling UP: ${streamCount} → ${newSize}`,
       );
       try {
         this._lastResizeTrigger = 'auto-scale-up';
         this._lastResizePeak = peak;
+        this._lastResizeCallRate = callRate;
         await this.resize(newSize);
         this.lastAutoScaleTime = now;
       } catch (err) {
         console.error('[ZeroBus/AutoScale] Scale-up failed:', err);
       }
       this.idleChecks = 0;
-    } else if (currentInflight === 0) {
+    } else if (currentInflight === 0 && callRate === 0) {
+      // ── Scale-down decision ────────────────────────────────────
+      // Require sustained idle: no in-flight AND no calls for
+      // IDLE_CHECKS_BEFORE_SCALE_DOWN consecutive checks.
       this.idleChecks++;
       if (
         this.idleChecks >= IDLE_CHECKS_BEFORE_SCALE_DOWN &&
-        streamCount > config.minSize
+        streamCount > config.minSize &&
+        cooldownElapsed
       ) {
         const newSize = Math.max(
           streamCount - config.scaleDownStep,
@@ -602,6 +635,8 @@ class ZeroBusService {
           `[ZeroBus/AutoScale] Idle for ${this.idleChecks} checks — scaling DOWN: ${streamCount} → ${newSize}`,
         );
         try {
+          this._lastResizeTrigger = 'auto-scale-down';
+          this._lastResizeIdle = this.idleChecks;
           await this.resize(newSize);
           this.lastAutoScaleTime = now;
         } catch (err) {

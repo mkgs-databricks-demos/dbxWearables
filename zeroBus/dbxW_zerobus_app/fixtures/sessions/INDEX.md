@@ -2,6 +2,7 @@
 
 | Date | Session | File |
 | --- | --- | --- |
+| 2026-04-21 | Dynamic Stream Pool Resize & Load-Based Auto-Scaling | [2026-04-21_dynamic-pool-resize-autoscale.md](2026-04-21_dynamic-pool-resize-autoscale.md) |
 | 2026-04-21 | SSE Load Test & Synthetic Data Generation Infrastructure | [2026-04-21_sse-load-test-synthetic-data.md](2026-04-21_sse-load-test-synthetic-data.md) |
 | 2026-04-21 | ZeroBus SDK Streaming Migration & Enterprise-Scale Architecture | [2026-04-21_zerobus-sdk-streaming-migration.md](2026-04-21_zerobus-sdk-streaming-migration.md) |
 | 2026-04-20 | Health Page Lakebase Check Fix & Details Grid Overflow | [2026-04-20_health-page-lakebase-fix.md](2026-04-20_health-page-lakebase-fix.md) |

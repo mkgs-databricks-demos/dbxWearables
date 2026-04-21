@@ -49,6 +49,7 @@ interface ResizeEvent {
   durationMs: number;
   peakInflight?: number;
   idleChecks?: number;
+  callRate?: number;
 }
 
 // ── Presets ───────────────────────────────────────────────────────────
@@ -756,6 +757,11 @@ export function LoadTestPage() {
                         {evt.peakInflight !== undefined && (
                           <span className="text-[10px] text-[var(--muted-foreground)]">
                             peak: {evt.peakInflight}
+                          </span>
+                        )}
+                        {evt.callRate !== undefined && evt.callRate > 0 && (
+                          <span className="text-[10px] text-[var(--muted-foreground)]">
+                            calls: {evt.callRate}
                           </span>
                         )}
                         {evt.idleChecks !== undefined && (
