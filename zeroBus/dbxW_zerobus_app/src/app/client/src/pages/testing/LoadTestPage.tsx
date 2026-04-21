@@ -5,27 +5,15 @@ import { type RecordType, RECORD_TYPES } from '@shared/synthetic-healthkit';
 
 /* ═══════════════════════════════════════════════════════════════════
    LoadTestPage — Synthetic Data Generation at Scale
-   Sends chunked requests to POST /api/v1/testing/load-test for
-   live progress feedback during million-record ingestion tests.
+   Connects to POST /api/v1/testing/load-test/stream via SSE
+   for real-time progress during million-record ingestion tests.
+   Server streams progress events after each batch; client reads
+   via fetch() + ReadableStream (single HTTP connection).
    ═══════════════════════════════════════════════════════════════════ */
 
 // ── Types ────────────────────────────────────────────────────────────
 
 type RecordCounts = Partial<Record<RecordType, number>>;
-
-interface TypeMetrics {
-  recordType: RecordType;
-  recordCount: number;
-  durationMs: number;
-}
-
-interface ChunkResult {
-  status: string;
-  totalRecords: number;
-  totalDurationMs: number;
-  recordsPerSec: number;
-  perType: TypeMetrics[];
-}
 
 interface TestState {
   phase: 'idle' | 'running' | 'complete' | 'error';
@@ -44,7 +32,6 @@ interface Preset {
   label: string;
   description: string;
   counts: RecordCounts;
-  chunkSize: number;
 }
 
 const PRESETS: Preset[] = [
@@ -52,31 +39,26 @@ const PRESETS: Preset[] = [
     label: 'Smoke',
     description: '5 payloads — verify the pipeline',
     counts: { samples: 2, workouts: 1, sleep: 1, activity_summaries: 1 },
-    chunkSize: 10,
   },
   {
     label: 'Small',
     description: '500 payloads (~1.5K records)',
     counts: { samples: 200, workouts: 100, sleep: 100, activity_summaries: 50, deletes: 50 },
-    chunkSize: 100,
   },
   {
     label: 'Medium',
     description: '5K payloads (~15K records)',
     counts: { samples: 2000, workouts: 1000, sleep: 1000, activity_summaries: 500, deletes: 500 },
-    chunkSize: 500,
   },
   {
     label: 'Large',
     description: '50K payloads (~150K records)',
     counts: { samples: 20000, workouts: 10000, sleep: 10000, activity_summaries: 5000, deletes: 5000 },
-    chunkSize: 1000,
   },
   {
     label: 'Massive',
     description: '500K payloads (~1.5M records)',
     counts: { samples: 200000, workouts: 100000, sleep: 100000, activity_summaries: 50000, deletes: 50000 },
-    chunkSize: 2000,
   },
 ];
 
@@ -102,10 +84,9 @@ function totalPayloads(counts: RecordCounts): number {
 
 export function LoadTestPage() {
   const [counts, setCounts] = useState<RecordCounts>(PRESETS[1].counts);
-  const [chunkSize, setChunkSize] = useState(PRESETS[1].chunkSize);
   const [batchSize, setBatchSize] = useState(500);
   const [activePreset, setActivePreset] = useState(1);
-  const abortRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const [state, setState] = useState<TestState>({
     phase: 'idle',
@@ -120,7 +101,6 @@ export function LoadTestPage() {
   const applyPreset = useCallback((index: number) => {
     const preset = PRESETS[index];
     setCounts({ ...preset.counts });
-    setChunkSize(preset.chunkSize);
     setActivePreset(index);
   }, []);
 
@@ -129,124 +109,132 @@ export function LoadTestPage() {
     setActivePreset(-1);
   }, []);
 
-  // ── Chunked execution loop ──────────────────────────────────────
+  // ── SSE streaming execution ─────────────────────────────────────
+  //
+  // Single fetch() to the SSE endpoint. The server processes all
+  // batches and streams progress events. We read them via
+  // ReadableStream + TextDecoder and update React state on each event.
 
   const runTest = useCallback(async () => {
-    abortRef.current = false;
-
-    // Build chunks: divide each type's count into chunkSize pieces
-    const chunks: RecordCounts[] = [];
-    for (const rt of RECORD_TYPES) {
-      const total = counts[rt] ?? 0;
-      if (total <= 0) continue;
-      let remaining = total;
-      let chunkIndex = 0;
-      while (remaining > 0) {
-        const size = Math.min(remaining, chunkSize);
-        if (!chunks[chunkIndex]) chunks[chunkIndex] = {};
-        chunks[chunkIndex][rt] = size;
-        remaining -= size;
-        chunkIndex++;
-      }
-    }
-
-    // Interleave types across chunks for even distribution
-    const maxChunks = Math.max(...RECORD_TYPES.map((rt) => {
-      const total = counts[rt] ?? 0;
-      return total > 0 ? Math.ceil(total / chunkSize) : 0;
-    }));
-    const interleavedChunks: RecordCounts[] = [];
-    for (let i = 0; i < maxChunks; i++) {
-      const chunk: RecordCounts = {};
-      for (const rt of RECORD_TYPES) {
-        const total = counts[rt] ?? 0;
-        if (total <= 0) continue;
-        const perChunk = Math.min(chunkSize, total - i * chunkSize);
-        if (perChunk > 0) chunk[rt] = perChunk;
-      }
-      if (Object.keys(chunk).length > 0) interleavedChunks.push(chunk);
-    }
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
     setState({
       phase: 'running',
       chunksCompleted: 0,
-      chunksTotal: interleavedChunks.length,
+      chunksTotal: 0,
       totalRecords: 0,
       totalDurationMs: 0,
       recordsPerSec: 0,
       perType: new Map(),
     });
 
-    const startTime = performance.now();
-    let cumulativeRecords = 0;
-    const typeAccum = new Map<RecordType, { records: number; durationMs: number }>();
-
     try {
-      for (let i = 0; i < interleavedChunks.length; i++) {
-        if (abortRef.current) {
-          setState((prev) => ({ ...prev, phase: 'idle', error: 'Aborted by user' }));
-          return;
-        }
+      const response = await fetch('/api/v1/testing/load-test/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          counts,
+          batchSize,
+          userId: 'synthetic-load-test',
+          sourcePlatform: 'synthetic',
+        }),
+        signal: abortController.signal,
+      });
 
-        const res = await fetch('/api/v1/testing/load-test', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            counts: interleavedChunks[i],
-            batchSize,
-            userId: 'synthetic-load-test',
-            sourcePlatform: 'synthetic',
-          }),
-        });
-
-        const data: ChunkResult = await res.json();
-
-        if (data.status !== 'success') {
-          throw new Error(data.status || 'Unknown server error');
-        }
-
-        cumulativeRecords += data.totalRecords;
-        const elapsedMs = Math.round(performance.now() - startTime);
-
-        // Accumulate per-type metrics
-        for (const tm of data.perType) {
-          const existing = typeAccum.get(tm.recordType) ?? { records: 0, durationMs: 0 };
-          existing.records += tm.recordCount;
-          existing.durationMs += tm.durationMs;
-          typeAccum.set(tm.recordType, existing);
-        }
-
-        setState({
-          phase: 'running',
-          chunksCompleted: i + 1,
-          chunksTotal: interleavedChunks.length,
-          totalRecords: cumulativeRecords,
-          totalDurationMs: elapsedMs,
-          recordsPerSec: elapsedMs > 0 ? Math.round((cumulativeRecords / elapsedMs) * 1000) : 0,
-          perType: new Map(typeAccum),
-        });
+      if (!response.ok) {
+        // Non-SSE error response (400, 500, etc.)
+        const errorData = await response.json();
+        throw new Error(errorData.message || `HTTP ${response.status}`);
       }
 
-      const finalMs = Math.round(performance.now() - startTime);
-      setState((prev) => ({
-        ...prev,
-        phase: 'complete',
-        totalDurationMs: finalMs,
-        recordsPerSec: finalMs > 0 ? Math.round((cumulativeRecords / finalMs) * 1000) : 0,
-      }));
+      // Read the SSE stream via ReadableStream
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE events are delimited by double newlines
+        const events = buffer.split('\n\n');
+        buffer = events.pop() ?? ''; // Keep incomplete event in buffer
+
+        for (const eventStr of events) {
+          if (!eventStr.trim()) continue;
+
+          // Parse SSE fields: "event: <type>\ndata: <json>"
+          const lines = eventStr.split('\n');
+          let eventType = '';
+          let data = '';
+
+          for (const line of lines) {
+            if (line.startsWith('event: ')) eventType = line.slice(7);
+            else if (line.startsWith('data: ')) data = line.slice(6);
+          }
+
+          if (!data) continue;
+
+          const parsed = JSON.parse(data);
+
+          // Build per-type map from the server's perType array
+          const typeMap = new Map<RecordType, { records: number; durationMs: number }>();
+          if (parsed.perType) {
+            for (const tm of parsed.perType) {
+              typeMap.set(tm.recordType, { records: tm.recordCount, durationMs: tm.durationMs });
+            }
+          }
+
+          if (eventType === 'progress') {
+            setState({
+              phase: 'running',
+              chunksCompleted: parsed.chunk,
+              chunksTotal: parsed.chunksTotal,
+              totalRecords: parsed.totalRecords,
+              totalDurationMs: parsed.totalDurationMs,
+              recordsPerSec: parsed.recordsPerSec,
+              perType: typeMap,
+            });
+          } else if (eventType === 'complete') {
+            setState({
+              phase: 'complete',
+              chunksCompleted: parsed.chunksTotal ?? parsed.chunk ?? 0,
+              chunksTotal: parsed.chunksTotal ?? parsed.chunk ?? 0,
+              totalRecords: parsed.totalRecords,
+              totalDurationMs: parsed.totalDurationMs,
+              recordsPerSec: parsed.recordsPerSec,
+              perType: typeMap,
+            });
+          } else if (eventType === 'error') {
+            setState((prev) => ({
+              ...prev,
+              phase: 'error',
+              error: parsed.message,
+            }));
+          }
+        }
+      }
     } catch (err) {
-      const finalMs = Math.round(performance.now() - startTime);
-      setState((prev) => ({
-        ...prev,
-        phase: 'error',
-        totalDurationMs: finalMs,
-        error: err instanceof Error ? err.message : String(err),
-      }));
+      if ((err as Error).name === 'AbortError') {
+        // User clicked Stop — records already ingested are preserved
+        setState((prev) => ({ ...prev, phase: 'idle' }));
+      } else {
+        setState((prev) => ({
+          ...prev,
+          phase: 'error',
+          error: err instanceof Error ? err.message : String(err),
+        }));
+      }
+    } finally {
+      abortControllerRef.current = null;
     }
-  }, [counts, chunkSize, batchSize]);
+  }, [counts, batchSize]);
 
   const stopTest = useCallback(() => {
-    abortRef.current = true;
+    abortControllerRef.current?.abort();
   }, []);
 
   const progress = state.chunksTotal > 0
@@ -303,8 +291,8 @@ export function LoadTestPage() {
             <h3 className="font-bold text-sm text-[var(--foreground)] mb-3">Payloads Per Type</h3>
             <div className="space-y-3">
               {RECORD_TYPES.map((rt) => (
-                <div key={rt} className="flex items-center gap-3">
-                  <label className="text-xs font-mono text-[var(--dbx-lava-500)] w-32 flex-shrink-0">
+                <div key={rt}>
+                  <label className="block text-xs font-mono text-[var(--dbx-lava-500)] mb-1">
                     {rt}
                   </label>
                   <input
@@ -313,7 +301,7 @@ export function LoadTestPage() {
                     value={counts[rt] ?? 0}
                     onChange={(e) => updateCount(rt, parseInt(e.target.value) || 0)}
                     disabled={state.phase === 'running'}
-                    className="flex-1 bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm font-mono text-[var(--foreground)] disabled:opacity-50"
+                    className="w-full bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm font-mono text-[var(--foreground)] disabled:opacity-50"
                   />
                 </div>
               ))}
@@ -330,20 +318,6 @@ export function LoadTestPage() {
           <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
             <h3 className="font-bold text-sm text-[var(--foreground)] mb-3">Advanced</h3>
             <div className="space-y-3">
-              <div>
-                <label className="block text-xs text-[var(--muted-foreground)] mb-1">
-                  Chunk size (payloads per HTTP request)
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={10000}
-                  value={chunkSize}
-                  onChange={(e) => setChunkSize(parseInt(e.target.value) || 500)}
-                  disabled={state.phase === 'running'}
-                  className="w-full bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm font-mono text-[var(--foreground)] disabled:opacity-50"
-                />
-              </div>
               <div>
                 <label className="block text-xs text-[var(--muted-foreground)] mb-1">
                   Batch size (records per gRPC write)
@@ -405,7 +379,7 @@ export function LoadTestPage() {
                   {state.phase === 'running' ? 'Ingesting...' : 'Complete'}
                 </span>
                 <span className="text-xs font-mono text-[var(--muted-foreground)]">
-                  {state.chunksCompleted}/{state.chunksTotal} chunks
+                  {state.chunksCompleted}/{state.chunksTotal} batches
                 </span>
               </div>
               <div className="w-full bg-[var(--muted)] rounded-full h-3 overflow-hidden">
