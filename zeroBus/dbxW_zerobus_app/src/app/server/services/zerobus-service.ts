@@ -115,8 +115,8 @@ class ZeroBusService {
 
   constructor(poolSize?: number) {
     this.poolSize = poolSize ??
-      parseInt(process.env.ZEROBUS_STREAM_POOL_SIZE || '', 10) ||
-      DEFAULT_POOL_SIZE;
+      (parseInt(process.env.ZEROBUS_STREAM_POOL_SIZE || '', 10) ||
+       DEFAULT_POOL_SIZE);
   }
 
   // ── Stream pool management ─────────────────────────────────────────
