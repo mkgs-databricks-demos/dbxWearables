@@ -16,6 +16,7 @@ const navItems: NavItem[] = [
   { to: '/', label: 'Overview', kind: 'lucide', icon: Home, end: true },
   { to: '/status', label: 'Health Status', kind: 'brand', brandKey: 'healthcare-white' },
   { to: '/docs', label: 'API Docs', kind: 'brand', brandKey: 'endpoint' },
+  { to: '/load-test', label: 'Load Test', kind: 'brand', brandKey: 'spark-streaming' },
   { to: '/security', label: 'Security', kind: 'brand', brandKey: 'data-security' },
 ];
 

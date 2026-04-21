@@ -4,6 +4,7 @@ import { HomePage } from '@/pages/home/HomePage';
 import { HealthPage } from '@/pages/health/HealthPage';
 import { DocsPage } from '@/pages/docs/DocsPage';
 import { SecurityPage } from '@/pages/security/SecurityPage';
+import { LoadTestPage } from '@/pages/testing/LoadTestPage';
 
 function Layout() {
   return (
@@ -86,6 +87,7 @@ const router = createBrowserRouter([
       { path: '/status', element: <HealthPage /> },
       { path: '/docs', element: <DocsPage /> },
       { path: '/security', element: <SecurityPage /> },
+      { path: '/load-test', element: <LoadTestPage /> },
     ],
   },
 ]);
