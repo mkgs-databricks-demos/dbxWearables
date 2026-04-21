@@ -1,0 +1,300 @@
+## Session: Dynamic Stream Pool Resize & Load-Based Auto-Scaling
+
+**Date:** 2026-04-21
+**Bundle:** dbxW_zerobus_app
+
+---
+
+### Summary
+
+Added runtime-resizable gRPC stream pool to the ZeroBus ingest service. The pool can be resized manually via API/UI or automatically based on load. A background monitor scales up when streams are saturated or call rate is high, and scales down after sustained idle. All resize events (auto, manual, initial) are recorded in a ring buffer and displayed in a scrollable event log on the Load Test page. Auto-scaling responds to all `ingestRecords()` callers -- real iOS HealthKit traffic and synthetic load test traffic alike. Per-preset batch sizes reduce gRPC round-trips for larger tests. Proxy timeout handling prevents false error states on long-running tests. Variable sample generation produces realistic mixed-type payloads (3-12 records, 10 HealthKit types) instead of fixed 3-record payloads.
+
+---
+
+### Context: Stream Pool Architecture
+
+The ZeroBus TypeScript SDK uses persistent gRPC streams to write records to the Unity Catalog bronze table. The `ZeroBusService` singleton manages a pool of these streams with round-robin selection. Prior to this session, the pool size was fixed at construction time from the `ZEROBUS_STREAM_POOL_SIZE` env var (sourced from the secret scope via `databricks.yml` variable).
+
+**Config chain (unchanged):**
+```
+databricks.yml var -> secret scope -> app.yaml valueFrom -> env var -> ZeroBusService constructor
+```
+
+Dev target runs at initial size 2 (`databricks.yml` L162). Default fallback is 4.
+
+---
+
+### Work Completed
+
+#### 1. Dynamic Pool Resize (`zerobus-service.ts`)
+
+Added `resize(newSize)` method to `ZeroBusService`:
+
+| Direction | Behavior |
+| --- | --- |
+| Scale UP | Opens additional gRPC streams via `sdk.createStream()`, appends to pool. Zero disruption -- existing in-flight requests continue on their streams |
+| Scale DOWN | Drains in-flight requests (polls up to 10s), splices excess streams from the tail, resets round-robin index, closes removed streams (flushes queued records) |
+| Not initialized | Updates `this.poolSize` target -- applied on next lazy init |
+
+**Prerequisite change:** `targetTable`, `clientId`, and `clientSecret` are now stored as instance fields during `initializePool()` so `resize()` can open new streams without re-reading env vars.
+
+Bounds: 1--32 streams. Validated in the method with a thrown error outside range.
+
+#### 2. Resize API Endpoints (`load-test-routes.ts`)
+
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/api/v1/testing/pool-status` | GET | Returns `pool_size`, `active_streams`, `initialized`, `inflight_requests`, `draining`, `auto_scale`, `history` |
+| `/api/v1/testing/pool-resize` | POST | Manual resize: `{ poolSize: N }` -> `{ oldSize, newSize, durationMs }` |
+| `/api/v1/testing/pool-autoscale` | POST | Toggle auto-scale: `{ enabled, minSize, maxSize }` |
+
+#### 3. Stream Pool UI Card (`LoadTestPage.tsx`)
+
+Added a "Stream Pool" card in the left configuration column:
+
+- Active streams badge (green when initialized)
+- Toggle switch for auto-scale on/off
+- When auto-scale enabled: min/max inputs (changes apply on blur)
+- When auto-scale disabled: manual resize input + Resize button
+- In-flight request indicator
+- Error display
+- Descriptive text changes based on mode
+
+Pool status is fetched on mount, after each test completion, and every 3s while auto-scale is active during a running test.
+
+#### 4. Load-Based Auto-Scaling (`zerobus-service.ts`)
+
+Background interval monitor (`setInterval`) that checks stream utilization every `checkIntervalMs` (default: 3s).
+
+**Scale-up triggers (two independent signals -- either can fire):**
+
+| Trigger | Condition | Catches |
+| --- | --- | --- |
+| Concurrent saturation | `peakInflight >= streamCount` | Multiple simultaneous callers (many iOS devices syncing at once) |
+| High call rate | `callsSinceLastCheck >= streamCount` | Sequential-but-heavy usage (load test batches, rapid iOS syncs in sequence) |
+
+- Adds `scaleUpStep` streams (default: 2) up to `maxSize` (default: 16)
+- `peakInflight` tracks the highest concurrent in-flight count between checks, reset each interval
+- `callsSinceLastCheck` increments on every `ingestRecords()` call, reset each interval
+- Fires on the very first check where either condition is met (no sustained requirement -- load testing needs fast response)
+
+**Scale-down trigger:** `inflight === 0 AND callRate === 0` for `IDLE_CHECKS_BEFORE_SCALE_DOWN` consecutive checks (default: 3)
+- Removes `scaleDownStep` streams (default: 1) down to `minSize` (default: 2)
+- Conservative: requires sustained idle (no in-flight AND no calls) to avoid premature scale-down between batches
+
+**Cooldown:** `cooldownMs` (default: 15s) between any two resize operations.
+
+**Configuration interface:**
+
+```typescript
+interface AutoScaleConfig {
+  minSize: number;         // default: 2
+  maxSize: number;         // default: 16
+  checkIntervalMs: number; // default: 3000 (3s)
+  cooldownMs: number;      // default: 15000 (15s)
+  scaleUpStep: number;     // default: 2
+  scaleDownStep: number;   // default: 1
+}
+```
+
+**Key design decision -- responds to ALL load, not just test traffic.** The auto-scale logic lives in `ZeroBusService`, not in the load test routes. Every call to `ingestRecords()` -- whether from the iOS app's real HealthKit POSTs via `/api/v1/healthkit/ingest` or from the synthetic load test -- increments `inflight`, `peakInflight`, and `callsSinceLastCheck`. The monitor responds to production load identically.
+
+**Lifecycle:**
+- `enableAutoScale(config)` starts the interval timer
+- `disableAutoScale()` clears the timer, pool stays at current size
+- `close()` (SIGTERM) calls `disableAutoScale()` before drain sequence
+
+#### 5. Resize Event History (`zerobus-service.ts`)
+
+Ring buffer of the last 50 `ResizeEvent` records:
+
+```typescript
+interface ResizeEvent {
+  timestamp: string;      // ISO 8601
+  trigger: 'auto-scale-up' | 'auto-scale-down' | 'manual' | 'initial';
+  oldSize: number;
+  newSize: number;
+  durationMs: number;
+  peakInflight?: number;  // auto-scale-up only
+  idleChecks?: number;    // auto-scale-down only
+  callRate?: number;      // auto-scale-up only (call rate trigger)
+}
+```
+
+Events are recorded for:
+- **`initial`** -- first `ensurePool()` opens the starting streams
+- **`auto-scale-up`** -- monitor detects saturation or high call rate, includes `peakInflight` and `callRate` context
+- **`auto-scale-down`** -- monitor detects sustained idle, includes `idleChecks` count
+- **`manual`** -- user clicks Resize in the UI
+
+Implementation uses a private `_lastResizeTrigger` / `_lastResizePeak` / `_lastResizeIdle` / `_lastResizeCallRate` context pattern: the caller sets these fields before calling `resize()`, and `resize()` reads + clears them when recording the event. This avoids changing the `resize()` method signature.
+
+#### 6. Event Log Panel (`LoadTestPage.tsx`)
+
+"Pool Resize History" panel in the results column:
+
+- Scrollable (max 224px), newest-first (reverse chronological)
+- Color-coded icons per trigger type:
+  - Green `ArrowUpCircle` for auto-scale-up
+  - Blue `ArrowDownCircle` for auto-scale-down
+  - Red `Settings2` gear for manual
+  - Gray `Sparkles` for initial
+- Trigger badges: `auto up`, `auto down`, `manual`, `initial`
+- Context annotations: `peak: N` for scale-up, `calls: N` for call-rate triggers, `idle: N x` for scale-down
+- Timestamp (locale time string) + duration per event
+- Auto-refreshes with pool status polling
+
+#### 7. Auto-Scale Bug Fix: Scale-Up Never Triggered
+
+**Symptom:** After enabling auto-scale and running a load test (Small preset, 500 payloads), auto-scale only scaled DOWN (10 -> 9 -> 8 -> ... -> 4) but never scaled UP. Manual resize worked fine.
+
+**Diagnosis from OTel logs:**
+```
+18:21:03 -- Auto-scale enabled (min: 2, max: 16)
+18:21:11 -- Starting: 500 payloads across 5 type(s)
+18:21:12 -- Complete: 900 records in 1145ms (786 rec/s)
+           (no auto-scale-up events anywhere)
+18:21:12 -- Idle for 3 checks -- scaling DOWN: 10 -> 9
+18:21:33 -- Idle for 3 checks -- scaling DOWN: 9 -> 8
+           ... continued down to 4
+```
+
+**Root cause:** The scale-up condition was `peakInflight >= streamCount`, but `generateAndIngestStreaming` processes batches **sequentially** (`await ingestRecords()` one at a time). With sequential processing, `inflight` is always 0 or 1. For a pool of 2+ streams, the condition `1 >= 2` is never true. The same applies to individual iOS HealthKit POSTs processed one at a time by Express.
+
+The only scenario where `peakInflight >= streamCount` would trigger is multiple simultaneous HTTP requests -- e.g., many iOS devices syncing at exactly the same time. But typical usage is sequential.
+
+**Fix:** Added a second, independent scale-up trigger -- **call rate**:
+
+```typescript
+// Two independent triggers (either can fire):
+const concurrentSaturated = peak >= streamCount;  // original
+const highCallRate = callRate >= streamCount;      // new
+
+if ((concurrentSaturated || highCallRate) && streamCount < config.maxSize && cooldownElapsed) {
+  // scale up
+}
+```
+
+`callsSinceLastCheck` increments on every `ingestRecords()` call and resets each check interval. If the pool handles at least as many calls as it has streams in a 3-second window, there's enough demand to justify more streams.
+
+For a Small preset (500 payloads, ~1500 records, batchSize 500): ~3 `ingestRecords()` calls per 3s interval. With 2 streams, `callRate (3) >= streamCount (2)` is true -> scale up fires.
+
+Scale-down was also tightened: now requires **both** `inflight === 0 AND callRate === 0` for 3 consecutive checks, preventing premature shrink during brief pauses between batches.
+
+The event log now shows `calls: N` alongside `peak: N` for scale-up events.
+
+#### 8. Per-Preset Batch Sizes (`LoadTestPage.tsx`)
+
+Previously, `batchSize` was a single state variable defaulting to 500, independent of preset selection. This meant the Massive preset (500K payloads) would produce ~3,000 gRPC `ingestRecords()` calls at 500 records each -- excessive round-trip overhead.
+
+Added `batchSize` field to the `Preset` interface. Each preset now sets an appropriate batch size when selected:
+
+| Preset | Payloads | Batch Size | Approx. Batches |
+| --- | --- | --- | --- |
+| Smoke | 5 | 500 | 1 |
+| Small | 500 | 500 | 3 |
+| Medium | 5K | 1,000 | 15 |
+| Large | 50K | 2,000 | 75 |
+| Massive | 500K | 5,000 | 300 |
+
+`applyPreset()` now calls `setBatchSize(preset.batchSize)` alongside `setCounts()`. The user can still override the batch size manually in the Advanced settings after selecting a preset -- the preset just sets a better default.
+
+**Impact on throughput:** Larger batch sizes mean fewer gRPC round-trips and less overhead per record. The Massive preset goes from ~3,000 batches to ~300 (10x reduction). Combined with auto-scale (up to 16 streams), this should significantly improve total test time and throughput for large presets.
+
+**Impact on auto-scale:** Fewer but larger batches mean fewer `ingestRecords()` calls per check interval, which changes the call-rate trigger dynamics. With batchSize 5,000 and a 3s check interval, the call rate is lower but each call does more work. The concurrent saturation trigger becomes more relevant at higher batch sizes since each call takes longer.
+
+#### 9. Proxy Timeout Graceful Handling (`LoadTestPage.tsx`)
+
+**Discovery:** The Massive preset (500K payloads, 734K records) completed successfully on the server at 2,446 rec/s, but the client showed a "network error" because the Databricks App gateway enforces a **~5-minute (300s) hard timeout** on HTTP requests. The SSE connection was severed at exactly 300,099ms -- 0.1s before the server's final `complete` event reached the client.
+
+```
+18:39:57.804 -- Client disconnected -- aborting  (proxy killed the SSE stream)
+18:39:57.907 -- Complete: 734,000 records in 300,099ms (2,446 rec/s)
+```
+
+The server completed successfully; all records were ingested. The proxy timeout is a fixed limit on total request duration, not a keepalive issue (progress events were flowing continuously).
+
+**Fix:** Updated the SSE error handler to detect network errors that occur while a test is actively running with records already ingested. Instead of showing a red error state, the client now:
+
+1. Sets phase to `'complete'` (not `'error'`)
+2. Stores the error message in `state.error` alongside the completion
+3. Shows a **yellow warning banner** ("Connection Lost During Test") with the last known record count and a note to check the event log
+4. Refreshes pool status on disconnect via `fetchPoolStatus()` in the `finally` block
+
+The existing red error display is preserved for genuine failures (errors before any records are ingested, or errors during the `idle` phase).
+
+**Platform constraint:** Tests under ~5 minutes (up to the Large preset at 50K payloads) are unaffected. The Massive preset (500K payloads) will likely hit the timeout with auto-scale enabled. Future options: chunk massive tests into sub-5-minute segments, or switch from SSE to WebSockets for the progress stream.
+
+#### 10. Variable Sample Type & Count Generation (`synthetic-healthkit.ts`)
+
+Previously, `generateSamplesPayload()` always produced exactly 3 records: 2 heart rate readings + 1 step count. Every payload was structurally identical -- only the values varied. This is unrealistic: real iOS HealthKit syncs contain variable numbers of mixed sample types depending on time since last sync.
+
+**Sample Type Registry:** Added a `SampleTypeConfig` interface and `SAMPLE_TYPES` array with 10 HealthKit quantity types, each with realistic value generators, source devices, duration semantics, and selection weights:
+
+| Type | Weight | Value Distribution | Duration |
+| --- | --- | --- | --- |
+| HeartRate | 3 (20%) | Gaussian ~72 bpm, 20% elevated | point-in-time |
+| StepCount | 2 (13%) | Gaussian ~5500/hr | 15-120 min |
+| ActiveEnergyBurned | 2 (13%) | Triangular 50-400 kcal | 15-60 min |
+| DistanceWalkingRunning | 2 (13%) | Gaussian ~800m | 5-45 min |
+| BasalEnergyBurned | 1 (7%) | Triangular 50-90 kcal/hr | ~60 min segments |
+| RestingHeartRate | 1 (7%) | Gaussian ~62 bpm | point-in-time |
+| HeartRateVariabilitySDNN | 1 (7%) | Gaussian ~45 ms | point-in-time |
+| OxygenSaturation | 1 (7%) | Gaussian ~97.5% (clamped 90-100) | point-in-time |
+| RespiratoryRate | 1 (7%) | Gaussian ~15/min | point-in-time |
+| FlightsClimbed | 1 (7%) | Uniform 1-8 | 2-15 min |
+
+Weighted selection uses a pre-computed flat array (`_weightedSampleTypes`) for O(1) random picks. Total weight: 15.
+
+**Variable count distribution (`randomSampleCount()`):** 3-12 records per payload, skewed toward 5-7:
+
+```
+3 (5%), 4 (10%), 5 (20%), 6 (25%), 7 (20%), 8 (10%), 9 (5%), 10-12 (5%)
+Weighted average: ~6.2 records per payload
+```
+
+**`generateSingleSample()` builder:** Takes a `SampleTypeConfig` + timestamp, generates a complete record with uuid, type, value, unit, start/end dates (point-in-time vs duration based on config), random source device, and optional metadata.
+
+**`generateSamplesPayload()` rewrite:** Calls `randomSampleCount()` then `randomSampleType()` for each record. Builds a dynamic description like `"6 samples (3 HeartRate, 2 StepCount, 1 OxygenSaturation)"` from type counts.
+
+**`generateDeletesPayload()` update:** Now produces 1-3 deletes per payload (70% single, 18% double, 12% triple, avg ~1.4). Delete references now use the full 10-type registry instead of the previous 3 hardcoded types.
+
+**`AVG_RECORDS_PER_PAYLOAD` export:** New constant exported from the shared module so `synthetic-data-service.ts` can estimate chunk counts accurately. Replaces the hardcoded `rt === 'samples' ? 3 : 1` with `AVG_RECORDS_PER_PAYLOAD[rt] ?? 1`.
+
+**Impact on data volume:** With 200K sample payloads (Massive preset), the expected sample records roughly doubles from ~600K to ~1.24M. The load test page's progress estimator uses `AVG_RECORDS_PER_PAYLOAD` to calculate accurate chunk totals.
+
+---
+
+### Files Modified
+
+| File | Lines | Change |
+| --- | --- | --- |
+| `src/app/server/services/zerobus-service.ts` | 747 | Credential instance fields, `resize()`, `AutoScaleConfig`, `enableAutoScale()`, `disableAutoScale()`, `checkAutoScale()` with dual-metric triggers (`peakInflight` + `callRate`), `callsSinceLastCheck` tracking, `ResizeEvent` ring buffer with `callRate` field, `recordResizeEvent()`, `autoScaleStatus()` |
+| `src/app/server/routes/testing/load-test-routes.ts` | 385 | `GET /pool-status`, `POST /pool-resize`, `POST /pool-autoscale` endpoints, `autoScaleStatus()` in response |
+| `src/app/client/src/pages/testing/LoadTestPage.tsx` | ~880 | Stream Pool card with auto-scale toggle + min/max inputs, manual resize, pool status polling (3s during tests), `toggleAutoScale` callback, `PoolStatus.auto_scale` interface, `ResizeEvent` interface with `callRate`, event history log panel with `calls: N` annotations, per-preset `batchSize` field (500/500/1000/2000/5000), proxy timeout graceful handling (yellow warning banner instead of red error), `fetchPoolStatus()` in `finally` block |
+| `src/app/shared/synthetic-healthkit.ts` | 560 | `SampleTypeConfig` interface, `SAMPLE_TYPES` registry (10 weighted HealthKit types), `randomSampleType()` weighted picker, `randomSampleCount()` (3-12, avg ~6.2), `generateSingleSample()` builder, rewritten `generateSamplesPayload()` with variable count + mixed types, updated `generateDeletesPayload()` (1-3 variable count, full type registry), `AVG_RECORDS_PER_PAYLOAD` export |
+| `src/app/server/services/synthetic-data-service.ts` | ~300 | Import `AVG_RECORDS_PER_PAYLOAD`, replaced hardcoded `rt === 'samples' ? 3 : 1` chunk estimate with `AVG_RECORDS_PER_PAYLOAD[rt]` lookup |
+
+---
+
+### Key Design Decisions
+
+1. **Auto-scale in the service, not the route layer.** Ensures all ingest callers benefit -- iOS app traffic, synthetic tests, any future ingestion path. The load test page is just the UI for enabling/configuring it.
+
+2. **Dual-metric scale-up (concurrent saturation + call rate).** The original `peakInflight >= streamCount` only detects concurrent callers. Adding `callsSinceLastCheck >= streamCount` captures sequential-but-heavy usage patterns -- critical because both the load test (sequential batches) and typical iOS traffic (one POST at a time) are sequential callers. Either trigger independently fires the scale-up.
+
+3. **Fast scale-up, conservative scale-down.** Scale-up triggers on the first check where either condition is met. Scale-down requires 3 consecutive checks with BOTH zero in-flight AND zero calls -- prevents premature shrink during brief pauses between batches.
+
+4. **Peak inflight + call rate tracking.** `peakInflight` captures the highest concurrent watermark between checks (brief spikes between intervals). `callsSinceLastCheck` captures total demand volume. Together they cover both concurrent and sequential usage patterns.
+
+5. **Ring buffer, not persistent storage.** Resize events are in-memory only (last 50). They reset on app restart. This is appropriate for an operational tool -- persistent history lives in the OTel logs table (`[ZeroBus] Pool resized: N -> M` console.log entries).
+
+6. **Context fields pattern for event recording.** Rather than adding `trigger` parameters to the `resize()` method signature (which would break manual callers), the auto-scale monitor sets private `_lastResizeTrigger` / `_lastResizePeak` / `_lastResizeCallRate` fields before calling `resize()`, and `resize()` reads + clears them. Manual resizes default to `trigger: 'manual'`.
+
+7. **Per-preset batch sizes over a single global default.** Larger presets need proportionally larger batches to avoid excessive gRPC round-trip overhead. The preset sets the default; the user can still override manually. This is a UX improvement -- users don't need to remember to bump batch size when selecting Large or Massive.
+
+8. **Graceful degradation on proxy timeout.** Rather than treating a mid-test network disconnect as a failure, the client recognizes that records were already ingested and shows partial success. This prevents false alarm error states for tests that actually completed on the server side. The 5-minute proxy limit is a platform constraint, not a bug.
+
+9. **Weighted sample type registry over hardcoded record lists.** The old `generateSamplesPayload()` always produced 2 HR + 1 step — easy to implement but produces monotonous test data that doesn't exercise schema diversity in the bronze table. The registry approach (config-driven types with weights, value generators, and duration semantics) is more realistic and extensible — adding a new HealthKit type is a single object push to `SAMPLE_TYPES`. The weighted distribution mirrors real Apple Watch behavior where heart rate samples dominate.
+
+10. **Variable record counts with exported averages.** Rather than requiring callers to know the internal distribution, the module exports `AVG_RECORDS_PER_PAYLOAD` so the chunk estimator stays accurate without coupling to the distribution logic. If the distribution changes, only the constant needs updating.
