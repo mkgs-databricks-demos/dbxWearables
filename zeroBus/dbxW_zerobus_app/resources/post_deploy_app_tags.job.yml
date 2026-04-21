@@ -1,41 +1,42 @@
 # Post-Deploy App Tags — applies bundle preset tags to the Databricks App
 #
-# The DABs app resource schema does not support a `tags` property (as of
-# Databricks CLI 0.290+). This job applies the same preset tags used by
-# jobs and pipelines to the Databricks App via the Workspace Entity Tag
-# Assignments API.
+# DISABLED: The Workspace Entity Tag Assignments API only supports
+# `dashboards` and `geniespaces` as entity types — `apps` is not yet
+# recognized. The Databricks Python SDK also has no app-tagging method.
 #
-# Usage after deploy:
-#   databricks bundle run post_deploy_app_tags --target dev
+# Re-enable this resource when either:
+#   1. The Entity Tag Assignments API adds `apps` as an entity_type, OR
+#   2. The DABs app resource schema gains native `tags` support
+#      (making this workaround unnecessary)
 #
-# The notebook can also be run interactively with default widget values.
-
-resources:
-  jobs:
-    post_deploy_app_tags:
-      name: "dbxW Post-Deploy App Tags"
-      description: >
-        Applies bundle preset tags to the Databricks App after deployment.
-        The DABs app resource YAML does not support tags natively, so this
-        job uses the Workspace Entity Tag Assignments API to apply them.
-      tags:
-        project: ${var.tags_project}
-        businessUnit: ${var.tags_businessUnit}
-        env: ${bundle.target}
-      tasks:
-        - task_key: apply_tags
-          notebook_task:
-            notebook_path: ../src/ops/post-deploy-app-tags.ipynb
-            base_parameters:
-              app_name: ${resources.apps.zerobus_ingest.name}
-              tag_project: ${var.tags_project}
-              tag_businessUnit: ${var.tags_businessUnit}
-              tag_developer: ${var.tags_developer}
-              tag_requestedBy: ${var.tags_requestedBy}
-              tag_RemoveAfter: ${var.tags_RemoveAfter}
-              tag_env: ${bundle.target}
-          environment_key: default
-      environments:
-        - environment_key: default
-          spec:
-            client: ${var.serverless_environment_version}
+# Original job definition (uncomment to re-enable):
+#
+# resources:
+#   jobs:
+#     post_deploy_app_tags:
+#       name: "dbxW Post-Deploy App Tags"
+#       description: >
+#         Applies bundle preset tags to the Databricks App after deployment.
+#         The DABs app resource YAML does not support tags natively, so this
+#         job uses the Workspace Entity Tag Assignments API to apply them.
+#       tags:
+#         project: ${var.tags_project}
+#         businessUnit: ${var.tags_businessUnit}
+#         env: ${bundle.target}
+#       tasks:
+#         - task_key: apply_tags
+#           notebook_task:
+#             notebook_path: ../src/ops/post-deploy-app-tags.ipynb
+#             base_parameters:
+#               app_name: ${resources.apps.zerobus_ingest.name}
+#               tag_project: ${var.tags_project}
+#               tag_businessUnit: ${var.tags_businessUnit}
+#               tag_developer: ${var.tags_developer}
+#               tag_requestedBy: ${var.tags_requestedBy}
+#               tag_RemoveAfter: ${var.tags_RemoveAfter}
+#               tag_env: ${bundle.target}
+#           environment_key: default
+#       environments:
+#         - environment_key: default
+#           spec:
+#             client: ${var.serverless_environment_version}
