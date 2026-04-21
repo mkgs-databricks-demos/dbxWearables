@@ -58,6 +58,7 @@ interface Preset {
   label: string;
   description: string;
   counts: RecordCounts;
+  batchSize: number;
 }
 
 const PRESETS: Preset[] = [
@@ -65,26 +66,31 @@ const PRESETS: Preset[] = [
     label: 'Smoke',
     description: '5 payloads — verify the pipeline',
     counts: { samples: 2, workouts: 1, sleep: 1, activity_summaries: 1 },
+    batchSize: 500,
   },
   {
     label: 'Small',
     description: '500 payloads (~1.5K records)',
     counts: { samples: 200, workouts: 100, sleep: 100, activity_summaries: 50, deletes: 50 },
+    batchSize: 500,
   },
   {
     label: 'Medium',
     description: '5K payloads (~15K records)',
     counts: { samples: 2000, workouts: 1000, sleep: 1000, activity_summaries: 500, deletes: 500 },
+    batchSize: 1000,
   },
   {
     label: 'Large',
     description: '50K payloads (~150K records)',
     counts: { samples: 20000, workouts: 10000, sleep: 10000, activity_summaries: 5000, deletes: 5000 },
+    batchSize: 2000,
   },
   {
     label: 'Massive',
     description: '500K payloads (~1.5M records)',
     counts: { samples: 200000, workouts: 100000, sleep: 100000, activity_summaries: 50000, deletes: 50000 },
+    batchSize: 5000,
   },
 ];
 
@@ -127,6 +133,7 @@ export function LoadTestPage() {
   const applyPreset = useCallback((index: number) => {
     const preset = PRESETS[index];
     setCounts({ ...preset.counts });
+    setBatchSize(preset.batchSize);
     setActivePreset(index);
   }, []);
 
@@ -345,14 +352,29 @@ export function LoadTestPage() {
         // User clicked Stop — records already ingested are preserved
         setState((prev) => ({ ...prev, phase: 'idle' }));
       } else {
-        setState((prev) => ({
-          ...prev,
-          phase: 'error',
-          error: err instanceof Error ? err.message : String(err),
-        }));
+        // Network errors during a running test (e.g., proxy timeout after
+        // 5 minutes) should show partial success, not a hard failure.
+        // The server likely completed — records are already ingested.
+        setState((prev) => {
+          if (prev.phase === 'running' && prev.totalRecords > 0) {
+            return {
+              ...prev,
+              phase: 'complete',
+              error: `Connection lost (${err instanceof Error ? err.message : 'network error'}). `
+                + `${formatNumber(prev.totalRecords)} records were ingested before disconnect. `
+                + `The server may have completed — check the event log.`,
+            };
+          }
+          return {
+            ...prev,
+            phase: 'error',
+            error: err instanceof Error ? err.message : String(err),
+          };
+        });
       }
     } finally {
       abortControllerRef.current = null;
+      fetchPoolStatus();
     }
   }, [counts, batchSize]);
 
@@ -786,6 +808,15 @@ export function LoadTestPage() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+
+          {/* Connection lost warning (complete but with error = proxy timeout) */}
+          {state.phase === 'complete' && state.error && (
+            <div className="bg-yellow-50 border border-yellow-300 rounded-xl p-5">
+              <h3 className="font-bold text-sm text-yellow-800 mb-1">Connection Lost During Test</h3>
+              <p className="text-xs text-yellow-700">{state.error}</p>
             </div>
           )}
 

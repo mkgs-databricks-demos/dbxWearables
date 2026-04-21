@@ -7,7 +7,7 @@
 
 ### Summary
 
-Added runtime-resizable gRPC stream pool to the ZeroBus ingest service. The pool can be resized manually via API/UI or automatically based on load. A background monitor scales up when streams are saturated or call rate is high, and scales down after sustained idle. All resize events (auto, manual, initial) are recorded in a ring buffer and displayed in a scrollable event log on the Load Test page. Auto-scaling responds to all `ingestRecords()` callers -- real iOS HealthKit traffic and synthetic load test traffic alike.
+Added runtime-resizable gRPC stream pool to the ZeroBus ingest service. The pool can be resized manually via API/UI or automatically based on load. A background monitor scales up when streams are saturated or call rate is high, and scales down after sustained idle. All resize events (auto, manual, initial) are recorded in a ring buffer and displayed in a scrollable event log on the Load Test page. Auto-scaling responds to all `ingestRecords()` callers -- real iOS HealthKit traffic and synthetic load test traffic alike. Per-preset batch sizes reduce gRPC round-trips for larger tests. Proxy timeout handling prevents false error states on long-running tests.
 
 ---
 
@@ -183,6 +183,48 @@ Scale-down was also tightened: now requires **both** `inflight === 0 AND callRat
 
 The event log now shows `calls: N` alongside `peak: N` for scale-up events.
 
+#### 8. Per-Preset Batch Sizes (`LoadTestPage.tsx`)
+
+Previously, `batchSize` was a single state variable defaulting to 500, independent of preset selection. This meant the Massive preset (500K payloads) would produce ~3,000 gRPC `ingestRecords()` calls at 500 records each -- excessive round-trip overhead.
+
+Added `batchSize` field to the `Preset` interface. Each preset now sets an appropriate batch size when selected:
+
+| Preset | Payloads | Batch Size | Approx. Batches |
+| --- | --- | --- | --- |
+| Smoke | 5 | 500 | 1 |
+| Small | 500 | 500 | 3 |
+| Medium | 5K | 1,000 | 15 |
+| Large | 50K | 2,000 | 75 |
+| Massive | 500K | 5,000 | 300 |
+
+`applyPreset()` now calls `setBatchSize(preset.batchSize)` alongside `setCounts()`. The user can still override the batch size manually in the Advanced settings after selecting a preset -- the preset just sets a better default.
+
+**Impact on throughput:** Larger batch sizes mean fewer gRPC round-trips and less overhead per record. The Massive preset goes from ~3,000 batches to ~300 (10x reduction). Combined with auto-scale (up to 16 streams), this should significantly improve total test time and throughput for large presets.
+
+**Impact on auto-scale:** Fewer but larger batches mean fewer `ingestRecords()` calls per check interval, which changes the call-rate trigger dynamics. With batchSize 5,000 and a 3s check interval, the call rate is lower but each call does more work. The concurrent saturation trigger becomes more relevant at higher batch sizes since each call takes longer.
+
+#### 9. Proxy Timeout Graceful Handling (`LoadTestPage.tsx`)
+
+**Discovery:** The Massive preset (500K payloads, 734K records) completed successfully on the server at 2,446 rec/s, but the client showed a "network error" because the Databricks App gateway enforces a **~5-minute (300s) hard timeout** on HTTP requests. The SSE connection was severed at exactly 300,099ms -- 0.1s before the server's final `complete` event reached the client.
+
+```
+18:39:57.804 -- Client disconnected -- aborting  (proxy killed the SSE stream)
+18:39:57.907 -- Complete: 734,000 records in 300,099ms (2,446 rec/s)
+```
+
+The server completed successfully; all records were ingested. The proxy timeout is a fixed limit on total request duration, not a keepalive issue (progress events were flowing continuously).
+
+**Fix:** Updated the SSE error handler to detect network errors that occur while a test is actively running with records already ingested. Instead of showing a red error state, the client now:
+
+1. Sets phase to `'complete'` (not `'error'`)
+2. Stores the error message in `state.error` alongside the completion
+3. Shows a **yellow warning banner** ("Connection Lost During Test") with the last known record count and a note to check the event log
+4. Refreshes pool status on disconnect via `fetchPoolStatus()` in the `finally` block
+
+The existing red error display is preserved for genuine failures (errors before any records are ingested, or errors during the `idle` phase).
+
+**Platform constraint:** Tests under ~5 minutes (up to the Large preset at 50K payloads) are unaffected. The Massive preset (500K payloads) will likely hit the timeout with auto-scale enabled. Future options: chunk massive tests into sub-5-minute segments, or switch from SSE to WebSockets for the progress stream.
+
 ---
 
 ### Files Modified
@@ -191,7 +233,7 @@ The event log now shows `calls: N` alongside `peak: N` for scale-up events.
 | --- | --- | --- |
 | `src/app/server/services/zerobus-service.ts` | 747 | Credential instance fields, `resize()`, `AutoScaleConfig`, `enableAutoScale()`, `disableAutoScale()`, `checkAutoScale()` with dual-metric triggers (`peakInflight` + `callRate`), `callsSinceLastCheck` tracking, `ResizeEvent` ring buffer with `callRate` field, `recordResizeEvent()`, `autoScaleStatus()` |
 | `src/app/server/routes/testing/load-test-routes.ts` | 385 | `GET /pool-status`, `POST /pool-resize`, `POST /pool-autoscale` endpoints, `autoScaleStatus()` in response |
-| `src/app/client/src/pages/testing/LoadTestPage.tsx` | 843 | Stream Pool card with auto-scale toggle + min/max inputs, manual resize, pool status polling (3s during tests), `toggleAutoScale` callback, `PoolStatus.auto_scale` interface, `ResizeEvent` interface with `callRate`, event history log panel with `calls: N` annotations |
+| `src/app/client/src/pages/testing/LoadTestPage.tsx` | ~880 | Stream Pool card with auto-scale toggle + min/max inputs, manual resize, pool status polling (3s during tests), `toggleAutoScale` callback, `PoolStatus.auto_scale` interface, `ResizeEvent` interface with `callRate`, event history log panel with `calls: N` annotations, per-preset `batchSize` field (500/500/1000/2000/5000), proxy timeout graceful handling (yellow warning banner instead of red error), `fetchPoolStatus()` in `finally` block |
 
 ---
 
@@ -208,3 +250,7 @@ The event log now shows `calls: N` alongside `peak: N` for scale-up events.
 5. **Ring buffer, not persistent storage.** Resize events are in-memory only (last 50). They reset on app restart. This is appropriate for an operational tool -- persistent history lives in the OTel logs table (`[ZeroBus] Pool resized: N -> M` console.log entries).
 
 6. **Context fields pattern for event recording.** Rather than adding `trigger` parameters to the `resize()` method signature (which would break manual callers), the auto-scale monitor sets private `_lastResizeTrigger` / `_lastResizePeak` / `_lastResizeCallRate` fields before calling `resize()`, and `resize()` reads + clears them. Manual resizes default to `trigger: 'manual'`.
+
+7. **Per-preset batch sizes over a single global default.** Larger presets need proportionally larger batches to avoid excessive gRPC round-trip overhead. The preset sets the default; the user can still override manually. This is a UX improvement -- users don't need to remember to bump batch size when selecting Large or Massive.
+
+8. **Graceful degradation on proxy timeout.** Rather than treating a mid-test network disconnect as a failure, the client recognizes that records were already ingested and shows partial success. This prevents false alarm error states for tests that actually completed on the server side. The 5-minute proxy limit is a platform constraint, not a bug.
