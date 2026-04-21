@@ -40,17 +40,51 @@ The app is a **TypeScript/Node.js** project built with `@databricks/appkit` (Exp
 ### Architecture
 
 ```
-                    ┌─────────────────────────────────────────────┐
-                    │  AppKit App (src/app/)                       │
-                    │                                              │
-  HealthKit POST ──►│  Express Server (server/server.ts)           │
-                    │    ├─ ZeroBus routes → SDK → bronze table    │
-                    │    └─ Lakebase routes → pg.Pool → Postgres   │
-                    │                                              │
-  Browser ─────────►│  React Client (client/src/)                  │
-                    │    └─ Vite + Tailwind + appkit-ui             │
-                    └─────────────────────────────────────────────┘
+                    ┌──────────────────────────────────────────────────┐
+                    │  AppKit App (src/app/)                            │
+                    │                                                   │
+  HealthKit POST ──►│  Express Server (server/server.ts)                │
+                    │    ├─ ZeroBus routes → SDK stream pool            │
+                    │    │    └─ N gRPC streams → UC bronze table       │
+                    │    └─ Lakebase routes → pg.Pool → Postgres        │
+                    │                                                   │
+  Browser ─────────►│  React Client (client/src/)                       │
+                    │    └─ Vite + Tailwind + appkit-ui                  │
+                    └──────────────────────────────────────────────────┘
 ```
+
+### ZeroBus SDK Streaming
+
+The server ingests wearable health data via the **ZeroBus Ingest SDK** (`@databricks/zerobus-ingest-sdk`), a Rust/NAPI-RS native module that maintains persistent gRPC streams to the ZeroBus Ingest server. This replaces the earlier stateless REST API approach.
+
+**Key design decisions:**
+
+| Aspect | Choice | Rationale |
+| --- | --- | --- |
+| Connection model | Fixed stream pool (round-robin) | ZeroBus docs: "your scaling strategy is to open more connections" |
+| Pool size | Configurable via `ZEROBUS_STREAM_POOL_SIZE` env var | Per-target control (dev=2, prod=4+) |
+| Initialization | Lazy (on first ingest request) | Avoids gRPC connections during health checks |
+| Durability | `ingestRecordOffset()` + `waitForOffset()` | Offset-based — response sent only after server ack |
+| Shutdown | 3-phase (drain gate → in-flight drain → stream close) | Guarantees every accepted record is durably committed before SIGTERM |
+| Authentication | SDK-managed OAuth (client credentials) | No manual token cache; SDK handles refresh |
+
+**Implementation files:**
+
+| File | Purpose |
+| --- | --- |
+| `server/services/zerobus-service.ts` | Stream pool lifecycle: init, round-robin selection, graceful shutdown |
+| `server/routes/zerobus/ingest-routes.ts` | Express routes: POST per record type, health check with pool status |
+
+#### NAPI-RS SDK Patch (v1.0.0 Workaround)
+
+The published `@databricks/zerobus-ingest-sdk@1.0.0` tarball is missing its `index.js` entry point (NAPI-RS build step was skipped before publish). The native `.node` binaries are present but Node.js can't load them without the JS shim. A postinstall patch copies locally-built files into `node_modules`:
+
+```
+patches/zerobus-ingest-sdk/     # Vendored index.js + index.d.ts (built locally with Rust 1.70+)
+scripts/patch-zerobus-sdk.mjs   # postinstall hook — copies patches into node_modules
+```
+
+See `patches/zerobus-ingest-sdk/README.md` for local build prerequisites and instructions. Check if the patch is still needed: `npm pack @databricks/zerobus-ingest-sdk --dry-run 2>&1 | grep index.js`
 
 ### Plugins
 
@@ -64,7 +98,7 @@ Configured in `src/app/appkit.plugins.json`:
 | `files` | `@databricks/appkit` | File operations against Volumes and Unity Catalog | Optional |
 | `genie` | `@databricks/appkit` | AI/BI Genie space integration | Optional |
 
-### App Resources (6 total)
+### App Resources (7 total)
 
 Defined in `resources/zerobus_ingest.app.yml` and mapped to environment variables in `src/app/app.yaml`:
 
@@ -76,6 +110,7 @@ Defined in `resources/zerobus_ingest.app.yml` and mapped to environment variable
 | `zerobus-workspace-url` | Secret scope | `zerobus-workspace-url` | `ZEROBUS_WORKSPACE_URL` |
 | `zerobus-endpoint` | Secret scope | `zerobus-endpoint` | `ZEROBUS_ENDPOINT` |
 | `zerobus-target-table` | Secret scope | `zerobus-target-table` | `ZEROBUS_TARGET_TABLE` |
+| `zerobus-stream-pool-size` | Secret scope | `zerobus-stream-pool-size` | `ZEROBUS_STREAM_POOL_SIZE` |
 
 Platform-injected (no `valueFrom` needed): `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGSSLMODE`, `DATABRICKS_CLIENT_ID`, `DATABRICKS_CLIENT_SECRET`.
 
@@ -84,8 +119,8 @@ Platform-injected (no `valueFrom` needed): `PGHOST`, `PGPORT`, `PGDATABASE`, `PG
 | Resource Type | Resource | Purpose | Status |
 | --- | --- | --- | --- |
 | Databricks App | `dbxw-zerobus-ingest-${var.schema}` | AppKit REST API + Lakebase + ZeroBus SDK | Defined |
+| Job | `post_deploy_app_tags` | Applies workspace entity tags to the app (DABs workaround) | Active |
 | Spark Declarative Pipeline | Silver/gold processing | Reads bronze → silver → gold | Planned |
-| Jobs | Pipeline orchestration | Scheduled runs of the pipeline | Planned |
 | Dashboards | AI/BI analytics | Wearable health data visualizations | Planned |
 
 ## Bundle Structure
@@ -96,16 +131,30 @@ dbxW_zerobus_app/
 ├── README.md                               # This file
 ├── .gitignore                              # Excludes .databricks/, build artifacts, node_modules
 ├── resources/
-│   └── zerobus_ingest.app.yml              # AppKit app resource (6 resources, per-target permissions)
+│   ├── zerobus_ingest.app.yml              # AppKit app resource (7 resources, per-target permissions)
+│   └── post_deploy_app_tags.job.yml        # Post-deploy job — applies workspace entity tags to the app
 ├── src/
+│   ├── ops/                                # Operational notebooks
+│   │   └── post-deploy-app-tags.ipynb      # Applies tags via Workspace Entity Tag Assignments API
 │   └── app/                                # AppKit source (source_code_path target)
 │       ├── app.yaml                        # Runtime command + env var bindings
 │       ├── appkit.plugins.json             # Plugin registry (lakebase, server, analytics, etc.)
-│       ├── package.json                    # Node.js dependencies (@databricks/appkit 0.20.3)
+│       ├── package.json                    # Node.js deps + postinstall patch hook
 │       ├── package-lock.json               # Locked dependency tree
+│       ├── scripts/
+│       │   └── patch-zerobus-sdk.mjs       # Postinstall: copies vendored SDK shim into node_modules
+│       ├── patches/
+│       │   └── zerobus-ingest-sdk/         # Vendored NAPI-RS files (index.js, index.d.ts)
+│       │       ├── index.js                # NAPI-RS JS shim — built locally with Rust 1.70+
+│       │       ├── index.d.ts              # TypeScript type definitions
+│       │       └── README.md               # Build prerequisites and instructions
 │       ├── server/                         # Express backend
 │       │   ├── server.ts                   # Entry point — createApp + plugin init
+│       │   ├── services/
+│       │   │   └── zerobus-service.ts      # SDK stream pool: init, round-robin, graceful shutdown
 │       │   └── routes/
+│       │       ├── zerobus/
+│       │       │   └── ingest-routes.ts    # POST routes per record type, health check
 │       │       └── lakebase/
 │       │           └── todo-routes.ts      # Sample Lakebase CRUD routes (scaffold)
 │       ├── client/                         # React frontend
@@ -115,15 +164,15 @@ dbxW_zerobus_app/
 │       │   ├── src/
 │       │   │   ├── App.tsx                 # Root React component
 │       │   │   ├── main.tsx                # React DOM entry
-│       │   │   └── pages/lakebase/         # Lakebase demo page
-│       │   └── public/                     # Static assets (favicons, manifest)
+│       │   │   └── pages/                  # Page components (home, health, docs, security, lakebase)
+│       │   └── public/                     # Static assets (favicons, fonts, brand images, manifest)
 │       ├── tests/
 │       │   └── smoke.spec.ts              # Playwright smoke test
 │       ├── tsconfig.json                   # Root TypeScript config
 │       ├── tsconfig.server.json            # Server-specific TS config
 │       ├── tsconfig.client.json            # Client-specific TS config
-│       ├── tsconfig.shared.json            # Shared TS config
-│       ├── tsdown.server.config.ts         # Server bundler config
+│       ├── tsconfig.shared.json            # Shared TS config (module: ESNext, moduleResolution: bundler)
+│       ├── tsdown.server.config.ts         # Server bundler config (unbundle: true, externalize npm pkgs)
 │       ├── vitest.config.ts                # Vitest test runner config
 │       ├── playwright.config.ts            # Playwright E2E config
 │       ├── eslint.config.js                # ESLint config
@@ -133,6 +182,8 @@ dbxW_zerobus_app/
 │       └── .gitignore                      # AppKit-specific ignores
 └── fixtures/
     ├── sessions/                           # Development session logs
+    ├── issues/
+    │   └── zerobus-sdk-missing-platform-binaries.md  # GitHub issue draft for SDK packaging bugs
     └── AppKit App Bundle Setup Session.ipynb
 ```
 
@@ -180,6 +231,8 @@ databricks postgres list-databases projects/dbxw-zerobus-wearables/branches/prod
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| `zerobus_stream_pool_size` | `4` (dev override: `2`) | Number of concurrent gRPC streams in the SDK stream pool |
+| `telemetry_table_prefix` | `dbxw_0bus_ingest` | Prefix for OTel tables: `{prefix}_otel_logs`, `_otel_spans`, `_otel_metrics` |
 | `dashboard_embed_credentials` | `false` | Dashboard credential mode (`true` = owner, `false` = viewer) |
 
 ### Tags (applied to all resources via presets)
@@ -275,6 +328,17 @@ databricks bundle deploy --target dev
 * Use the **Add** dropdown in the Deployments panel to add new resources
 * Click **Schedule** on a notebook to create a job definition
 
+## Post-Deploy App Tagging
+
+DABs app resources do not natively support tags. The `post_deploy_app_tags` job works around this by applying workspace entity tags via the REST API after each deployment.
+
+**Usage:**
+```bash
+databricks bundle run post_deploy_app_tags --target dev
+```
+
+**How it works:** The job passes the app name and 6 tag variables as parameters to `src/ops/post-deploy-app-tags.ipynb`, which calls the Workspace Entity Tag Assignments API to apply `project`, `businessUnit`, `developer`, `requestedBy`, `RemoveAfter`, and `env` tags to the deployed Databricks App.
+
 ## Documentation
 
 * [dbxWearables project README](../../README.md)
@@ -283,6 +347,7 @@ databricks bundle deploy --target dev
 * [Declarative Automation Bundles in the workspace](https://docs.databricks.com/aws/en/dev-tools/bundles/workspace-bundles)
 * [Declarative Automation Bundles Configuration reference](https://docs.databricks.com/aws/en/dev-tools/bundles/reference)
 * [ZeroBus Ingest overview](https://docs.databricks.com/aws/en/ingestion/zerobus-overview/)
+* [ZeroBus Ingest SDK (GitHub)](https://github.com/databricks/zerobus-sdk)
 * [ZeroBus Ingest connector](https://docs.databricks.com/aws/en/ingestion/zerobus-ingest/)
 * [Databricks Apps (AppKit)](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/)
 * [Lakebase Autoscaling](https://docs.databricks.com/aws/en/lakebase/)
