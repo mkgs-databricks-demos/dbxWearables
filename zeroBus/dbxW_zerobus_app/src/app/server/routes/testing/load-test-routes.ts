@@ -176,14 +176,23 @@ export async function setupLoadTestRoutes(appkit: AppKitServer) {
           res.flushHeaders();
 
           // ── Abort detection ─────────────────────────────────────
-          // When the client calls reader.cancel() or abortController.abort(),
-          // the TCP connection closes and Express fires req 'close'.
+          // IMPORTANT: We listen on `res.on('close')`, NOT `req.on('close')`.
+          // `req.on('close')` fires when the POST request body is fully
+          // consumed (~2ms for a small JSON body) — NOT when the client
+          // disconnects. `res.on('close')` fires when the response stream
+          // is terminated: either by our res.end() (normal) or by the
+          // client aborting (reader.cancel() / AbortController.abort()).
           const abortController = new AbortController();
           let clientDisconnected = false;
-          req.on('close', () => {
-            clientDisconnected = true;
-            abortController.abort();
-            console.log('[LoadTest/SSE] Client disconnected — aborting');
+          let responseEnded = false;
+
+          res.on('close', () => {
+            if (!responseEnded) {
+              // Client closed the connection before we called res.end()
+              clientDisconnected = true;
+              abortController.abort();
+              console.log('[LoadTest/SSE] Client disconnected — aborting');
+            }
           });
 
           // Helper: write an SSE event and flush immediately.
@@ -216,7 +225,10 @@ export async function setupLoadTestRoutes(appkit: AppKitServer) {
           );
 
           writeEvent('complete', { status: 'success', ...result });
-          if (!clientDisconnected) res.end();
+          if (!clientDisconnected) {
+            responseEnded = true;
+            res.end();
+          }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           console.error('[LoadTest/SSE] Failed:', message);
@@ -226,6 +238,7 @@ export async function setupLoadTestRoutes(appkit: AppKitServer) {
             res.write(`event: error\ndata: ${JSON.stringify({ status: 'error', message })}\n\n`);
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             if (typeof (res as any).flush === 'function') (res as any).flush();
+            responseEnded = true;
             res.end();
           } catch {
             // Client already gone — nothing to do
