@@ -10,11 +10,11 @@ import {
 } from 'lucide-react';
 import { BrandIcon } from '@/components/BrandIcon';
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ═════════════════════════════════════════════════════════════════
    DocsPage — API Documentation (Swagger-style)
    Interactive docs for POST /api/v1/healthkit/ingest and
    GET /api/v1/healthkit/health
-   ═══════════════════════════════════════════════════════════════════ */
+   ═════════════════════════════════════════════════════════════════ */
 
 export function DocsPage() {
   return (
@@ -57,7 +57,7 @@ export function DocsPage() {
 }
 
 
-/* ── Streaming Architecture Panel ─────────────────────────────────── */
+/* ── Streaming Architecture Panel ─────────────────────────────────────── */
 function StreamingArchitecture() {
   const [expanded, setExpanded] = useState(false);
 
@@ -234,7 +234,7 @@ function StreamingArchitecture() {
   );
 }
 
-/* ── POST /api/v1/healthkit/ingest ────────────────────────────────── */
+/* ── POST /api/v1/healthkit/ingest ────────────────────────────────────── */
 function IngestEndpoint() {
   const [expanded, setExpanded] = useState(false);
   const [tryItOpen, setTryItOpen] = useState(false);
@@ -378,7 +378,7 @@ function IngestEndpoint() {
   );
 }
 
-/* ── GET /api/v1/healthkit/health ─────────────────────────────────── */
+/* ── GET /api/v1/healthkit/health ─────────────────────────────────────── */
 function HealthEndpoint() {
   const [expanded, setExpanded] = useState(false);
 
@@ -402,11 +402,57 @@ function HealthEndpoint() {
         <div className="border-t border-[var(--border)] p-6 space-y-6">
           <p className="text-sm text-[var(--muted-foreground)] leading-relaxed">
             Lightweight health and readiness check. Returns the ZeroBus configuration status,
-            target table name, and lists any missing environment variables.
+            target table name, stream pool state, and lists any missing environment variables.
           </p>
 
+          {/* Stream pool field reference */}
           <div>
-            <h4 className="font-bold text-sm text-[var(--foreground)] mb-3">Response</h4>
+            <h4 className="font-bold text-sm text-[var(--foreground)] mb-3 flex items-center gap-2">
+              <BrandIcon name="spark-streaming" className="h-4 w-4" />
+              Stream Pool Fields
+            </h4>
+            <div className="border border-[var(--border)] rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-[var(--muted)]">
+                  <tr>
+                    <th className="text-left py-2 px-4 font-medium text-[var(--muted-foreground)]">Field</th>
+                    <th className="text-left py-2 px-4 font-medium text-[var(--muted-foreground)]">Type</th>
+                    <th className="text-left py-2 px-4 font-medium text-[var(--muted-foreground)]">Description</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border)]">
+                  {[
+                    ['pool_size', 'number', 'Configured number of gRPC streams (from ZEROBUS_STREAM_POOL_SIZE)'],
+                    ['active_streams', 'number', 'Streams currently connected to the ZeroBus Ingest server'],
+                    ['initialized', 'boolean', 'Whether the pool has been created (false until first ingest request)'],
+                    ['inflight_requests', 'number', 'HTTP requests currently being processed through the pool'],
+                    ['draining', 'boolean', 'True during graceful shutdown — no new requests accepted'],
+                  ].map(([field, type, desc], i) => (
+                    <tr key={i} className="hover:bg-[var(--muted)]/50">
+                      <td className="py-2 px-4 font-mono text-xs text-[var(--dbx-lava-500)]">
+                        stream_pool.{field}
+                      </td>
+                      <td className="py-2 px-4 text-xs">
+                        <code className="bg-[var(--muted)] px-1.5 py-0.5 rounded">{type}</code>
+                      </td>
+                      <td className="py-2 px-4 text-xs text-[var(--muted-foreground)]">{desc}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-[var(--muted-foreground)] mt-2 flex items-center gap-1">
+              <AlertCircle className="h-3 w-3" />
+              The pool uses <strong>lazy initialization</strong> — <code className="bg-[var(--muted)] px-1 py-0.5 rounded">initialized</code> is{' '}
+              <code className="bg-[var(--muted)] px-1 py-0.5 rounded">false</code> and{' '}
+              <code className="bg-[var(--muted)] px-1 py-0.5 rounded">active_streams</code> is{' '}
+              <code className="bg-[var(--muted)] px-1 py-0.5 rounded">0</code> until the first ingest request triggers pool creation (~900ms).
+              Subsequent requests are 100–200ms.
+            </p>
+          </div>
+
+          <div>
+            <h4 className="font-bold text-sm text-[var(--foreground)] mb-3">Response (streams active)</h4>
             <CodeBlock
               title="200 OK"
               code={`{
@@ -415,9 +461,31 @@ function HealthEndpoint() {
   "env_configured": true,
   "target_table": "hls_fde.wearables.wearables_zerobus",
   "stream_pool": {
-    "size": 2,
-    "status": "ready",
-    "active_streams": 2
+    "pool_size": 2,
+    "active_streams": 2,
+    "initialized": true,
+    "inflight_requests": 0,
+    "draining": false
+  }
+}`}
+            />
+          </div>
+
+          <div>
+            <h4 className="font-bold text-sm text-[var(--foreground)] mb-3">Response (before first ingest — pool not yet initialized)</h4>
+            <CodeBlock
+              title="200 OK"
+              code={`{
+  "status": "ok",
+  "service": "zerobus-healthkit-ingest",
+  "env_configured": true,
+  "target_table": "hls_fde.wearables.wearables_zerobus",
+  "stream_pool": {
+    "pool_size": 2,
+    "active_streams": 0,
+    "initialized": false,
+    "inflight_requests": 0,
+    "draining": false
   }
 }`}
             />
@@ -453,7 +521,7 @@ function HealthEndpoint() {
   );
 }
 
-/* ── Try It Panel ─────────────────────────────────────────────────── */
+/* ── Try It Panel ───────────────────────────────────────────────────── */
 function TryItPanel() {
   const [recordType, setRecordType] = useState('samples');
   const [body, setBody] = useState(
@@ -550,7 +618,7 @@ function TryItPanel() {
   );
 }
 
-/* ── Record Types Reference ───────────────────────────────────────── */
+/* ── Record Types Reference ─────────────────────────────────────────── */
 function RecordTypesRef() {
   return (
     <div className="mt-12">
@@ -589,7 +657,7 @@ function RecordTypesRef() {
   );
 }
 
-/* ── Error Codes Reference ────────────────────────────────────────── */
+/* ── Error Codes Reference ──────────────────────────────────────────── */
 function ErrorCodesRef() {
   return (
     <div className="mt-10">
@@ -629,7 +697,7 @@ function ErrorCodesRef() {
   );
 }
 
-/* ── Shared components ────────────────────────────────────────────── */
+/* ── Shared components ────────────────────────────────────────────────── */
 function RequiredBadge() {
   return <span className="text-xs font-medium px-2 py-0.5 rounded bg-red-50 text-red-600">required</span>;
 }

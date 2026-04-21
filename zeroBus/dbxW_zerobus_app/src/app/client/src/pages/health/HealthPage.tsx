@@ -5,6 +5,8 @@ import {
   AlertTriangle,
   RefreshCw,
   Clock,
+  Zap,
+  Radio,
 } from 'lucide-react';
 import { BrandIcon } from '@/components/BrandIcon';
 import type { IconKey } from '@/icons';
@@ -16,6 +18,14 @@ import type { IconKey } from '@/icons';
 
 type CheckStatus = 'idle' | 'loading' | 'ok' | 'warning' | 'error';
 
+interface StreamPoolState {
+  pool_size: number;
+  active_streams: number;
+  initialized: boolean;
+  inflight_requests: number;
+  draining: boolean;
+}
+
 interface HealthCheck {
   id: string;
   name: string;
@@ -24,6 +34,7 @@ interface HealthCheck {
   status: CheckStatus;
   message: string;
   details?: Record<string, unknown>;
+  streamPool?: StreamPoolState;
   latencyMs?: number;
 }
 
@@ -170,7 +181,6 @@ function HealthCheckCard({ check }: { check: HealthCheck }) {
   }[check.status];
 
   const StatusIcon = statusConfig.icon;
-  // Brand icon from registry
 
   return (
     <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 flex items-start gap-5 hover:shadow-md transition-shadow">
@@ -208,10 +218,197 @@ function HealthCheckCard({ check }: { check: HealthCheck }) {
             </div>
           </div>
         )}
+
+        {/* Stream Pool Section */}
+        {check.streamPool && <StreamPoolSection pool={check.streamPool} />}
       </div>
 
       {/* Status icon */}
       <StatusIcon className={`h-6 w-6 flex-shrink-0 ${statusConfig.color}`} />
+    </div>
+  );
+}
+
+/* ── Stream Pool Status Section ───────────────────────────────────────────── */
+function StreamPoolSection({ pool }: { pool: StreamPoolState }) {
+  const isActive = pool.initialized && pool.active_streams > 0;
+  const isIdle = pool.initialized && pool.active_streams === 0;
+  const isWaiting = !pool.initialized;
+  const isDraining = pool.draining;
+
+  // Determine overall pool status for header badge
+  let statusLabel: string;
+  let statusBg: string;
+  let statusIcon: typeof Zap;
+  if (isDraining) {
+    statusLabel = 'Draining';
+    statusBg = 'bg-amber-100 text-amber-700';
+    statusIcon = AlertTriangle;
+  } else if (isActive) {
+    statusLabel = 'Streaming';
+    statusBg = 'bg-emerald-100 text-emerald-700';
+    statusIcon = Zap;
+  } else if (isIdle) {
+    statusLabel = 'Idle';
+    statusBg = 'bg-blue-100 text-blue-700';
+    statusIcon = Radio;
+  } else {
+    statusLabel = 'Waiting for first request';
+    statusBg = 'bg-gray-100 text-gray-600';
+    statusIcon = Clock;
+  }
+  const PoolStatusIcon = statusIcon;
+
+  return (
+    <div className="mt-3 border border-[var(--border)] rounded-lg overflow-hidden">
+      {/* Header */}
+      <div className="bg-[var(--dbx-navy-800)] px-4 py-2.5 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <BrandIcon name="spark-streaming" className="h-4 w-4" />
+          <span className="text-xs font-bold text-white uppercase tracking-wider">
+            ZeroBus Stream Pool
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex items-center gap-1 ${statusBg}`}>
+            <PoolStatusIcon className="h-3 w-3" />
+            {statusLabel}
+          </span>
+        </div>
+      </div>
+
+      {/* Metrics grid */}
+      <div className="bg-[var(--muted)] p-3">
+        <div className="grid grid-cols-3 gap-3">
+          {/* Active Streams — primary metric */}
+          <div className="bg-[var(--card)] rounded-lg p-3 text-center border border-[var(--border)]">
+            <div className="flex items-center justify-center gap-1.5 mb-1">
+              {isActive && (
+                <div className="w-2 h-2 rounded-full bg-[var(--dbx-green-600)] status-pulse" />
+              )}
+              <span className={`text-2xl font-bold tabular-nums ${
+                isActive
+                  ? 'text-[var(--dbx-green-600)]'
+                  : isIdle
+                    ? 'text-blue-500'
+                    : 'text-[var(--muted-foreground)]'
+              }`}>
+                {pool.active_streams}
+              </span>
+              <span className="text-sm text-[var(--muted-foreground)]">/</span>
+              <span className="text-sm text-[var(--muted-foreground)]">{pool.pool_size}</span>
+            </div>
+            <span className="text-[10px] text-[var(--muted-foreground)] uppercase tracking-wider font-medium">
+              Active Streams
+            </span>
+          </div>
+
+          {/* In-flight Requests */}
+          <div className="bg-[var(--card)] rounded-lg p-3 text-center border border-[var(--border)]">
+            <div className="text-2xl font-bold tabular-nums text-[var(--foreground)] mb-1">
+              {pool.inflight_requests}
+            </div>
+            <span className="text-[10px] text-[var(--muted-foreground)] uppercase tracking-wider font-medium">
+              In-flight
+            </span>
+          </div>
+
+          {/* Pool Size (configured) */}
+          <div className="bg-[var(--card)] rounded-lg p-3 text-center border border-[var(--border)]">
+            <div className="text-2xl font-bold tabular-nums text-[var(--foreground)] mb-1">
+              {pool.pool_size}
+            </div>
+            <span className="text-[10px] text-[var(--muted-foreground)] uppercase tracking-wider font-medium">
+              Pool Size
+            </span>
+          </div>
+        </div>
+
+        {/* Status indicators row */}
+        <div className="flex items-center gap-4 mt-3 px-1">
+          <StatusDot
+            label="Initialized"
+            active={pool.initialized}
+            activeColor="bg-[var(--dbx-green-600)]"
+          />
+          <StatusDot
+            label="Draining"
+            active={pool.draining}
+            activeColor="bg-amber-500"
+            inactiveIsGood
+          />
+        </div>
+
+        {/* Contextual hint for demos */}
+        {isWaiting && (
+          <div className="mt-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 flex items-start gap-2">
+            <Clock className="h-3.5 w-3.5 text-blue-500 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-blue-700 leading-relaxed">
+              <strong>Lazy initialization:</strong> The stream pool starts when the first
+              record is ingested, not at server startup. Send a record via the{' '}
+              <a href="/docs" className="underline font-medium">Try It</a>{' '}
+              panel, then refresh to see the streams activate.
+            </p>
+          </div>
+        )}
+        {isIdle && (
+          <div className="mt-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 flex items-start gap-2">
+            <Radio className="h-3.5 w-3.5 text-blue-500 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-blue-700 leading-relaxed">
+              <strong>Pool initialized, streams idle.</strong> The gRPC connections are
+              established but no records are actively in flight. Streams will show as
+              active during the next ingest request.
+            </p>
+          </div>
+        )}
+        {isActive && (
+          <div className="mt-3 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 flex items-start gap-2">
+            <Zap className="h-3.5 w-3.5 text-emerald-600 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-emerald-700 leading-relaxed">
+              <strong>Streams active.</strong> {pool.active_streams} persistent gRPC
+              connection{pool.active_streams !== 1 ? 's' : ''} to the ZeroBus Ingest
+              server. Records are written with offset-based durability.
+            </p>
+          </div>
+        )}
+        {isDraining && (
+          <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-start gap-2">
+            <AlertTriangle className="h-3.5 w-3.5 text-amber-600 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-amber-700 leading-relaxed">
+              <strong>Graceful shutdown in progress.</strong> The pool is draining in-flight
+              requests before closing streams. No new records will be accepted.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Status dot indicator ─────────────────────────────────────────────────── */
+function StatusDot({
+  label,
+  active,
+  activeColor,
+  inactiveIsGood,
+}: {
+  label: string;
+  active: boolean;
+  activeColor: string;
+  inactiveIsGood?: boolean;
+}) {
+  const dotColor = active
+    ? activeColor
+    : inactiveIsGood
+      ? 'bg-[var(--dbx-green-600)]'
+      : 'bg-gray-300';
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className={`w-2 h-2 rounded-full ${dotColor}`} />
+      <span className="text-xs text-[var(--muted-foreground)]">
+        {label}: <span className="font-medium text-[var(--foreground)]">{active ? 'Yes' : 'No'}</span>
+      </span>
     </div>
   );
 }
@@ -291,17 +488,42 @@ async function runSingleCheck(check: HealthCheck): Promise<HealthCheck> {
           };
         }
         const data = await res.json();
+        const pool: StreamPoolState | undefined = data.stream_pool
+          ? {
+              pool_size: data.stream_pool.pool_size ?? 0,
+              active_streams: data.stream_pool.active_streams ?? 0,
+              initialized: data.stream_pool.initialized ?? false,
+              inflight_requests: data.stream_pool.inflight_requests ?? 0,
+              draining: data.stream_pool.draining ?? false,
+            }
+          : undefined;
+
+        // Build message based on pool state
+        let message: string;
+        if (!data.env_configured) {
+          message = `Missing env vars: ${data.missing_env_vars?.join(', ') || 'unknown'}`;
+        } else if (pool?.draining) {
+          message = 'ZeroBus stream pool is draining — graceful shutdown in progress';
+        } else if (pool?.initialized && pool.active_streams > 0) {
+          message = `ZeroBus streaming — ${pool.active_streams}/${pool.pool_size} gRPC streams active`;
+        } else if (pool?.initialized) {
+          message = `ZeroBus initialized — ${pool.pool_size} streams ready, idle (no active ingest)`;
+        } else if (pool) {
+          message = 'ZeroBus configured — stream pool starts on first ingest request';
+        } else {
+          message = 'ZeroBus environment fully configured and ready';
+        }
+
         return {
           ...check,
           status: data.env_configured ? 'ok' : 'warning',
-          message: data.env_configured
-            ? 'ZeroBus environment fully configured and ready'
-            : `Missing env vars: ${data.missing_env_vars?.join(', ') || 'unknown'}`,
+          message,
           details: {
             service: data.service,
             target_table: data.target_table,
             env_configured: String(data.env_configured),
           },
+          streamPool: pool,
           latencyMs,
         };
       }
