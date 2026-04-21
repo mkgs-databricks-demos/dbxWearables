@@ -171,6 +171,10 @@ export async function setupLoadTestRoutes(appkit: AppKitServer) {
             'X-Accel-Buffering': 'no', // Disable nginx/proxy buffering
           });
 
+          // Force headers to the client immediately so the browser
+          // enters streaming mode (starts reading response.body).
+          res.flushHeaders();
+
           // ── Abort detection ─────────────────────────────────────
           // When the client calls reader.cancel() or abortController.abort(),
           // the TCP connection closes and Express fires req 'close'.
@@ -182,10 +186,17 @@ export async function setupLoadTestRoutes(appkit: AppKitServer) {
             console.log('[LoadTest/SSE] Client disconnected — aborting');
           });
 
-          // Helper: write an SSE event (no-op if client disconnected)
+          // Helper: write an SSE event and flush immediately.
+          // Without flush(), Express compression middleware (or Node.js
+          // internal buffering) holds data in memory instead of pushing
+          // it to the socket — the client never sees progress events.
           const writeEvent = (event: string, data: unknown) => {
             if (!clientDisconnected) {
               res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+              // Flush through compression middleware if present.
+              // The `compression` npm package patches res to add flush().
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              if (typeof (res as any).flush === 'function') (res as any).flush();
             }
           };
 
@@ -213,6 +224,8 @@ export async function setupLoadTestRoutes(appkit: AppKitServer) {
           // Try to send error event (client may already be disconnected)
           try {
             res.write(`event: error\ndata: ${JSON.stringify({ status: 'error', message })}\n\n`);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            if (typeof (res as any).flush === 'function') (res as any).flush();
             res.end();
           } catch {
             // Client already gone — nothing to do
