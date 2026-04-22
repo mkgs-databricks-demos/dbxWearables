@@ -24,6 +24,11 @@ interface StreamPoolState {
   initialized: boolean;
   inflight_requests: number;
   draining: boolean;
+  auto_scale?: {
+    enabled: boolean;
+    min_size: number;
+    max_size: number;
+  };
 }
 
 interface HealthCheck {
@@ -313,13 +318,15 @@ function StreamPoolSection({ pool }: { pool: StreamPoolState }) {
             </span>
           </div>
 
-          {/* Pool Size (configured) */}
+          {/* Pool Size (configured or auto-scale range) */}
           <div className="bg-[var(--card)] rounded-lg p-3 text-center border border-[var(--border)]">
             <div className="text-2xl font-bold tabular-nums text-[var(--foreground)] mb-1">
               {pool.pool_size}
             </div>
             <span className="text-[10px] text-[var(--muted-foreground)] uppercase tracking-wider font-medium">
-              Pool Size
+              {pool.auto_scale?.enabled
+                ? `Pool (${pool.auto_scale.min_size}–${pool.auto_scale.max_size})`
+                : 'Pool Size'}
             </span>
           </div>
         </div>
@@ -329,6 +336,11 @@ function StreamPoolSection({ pool }: { pool: StreamPoolState }) {
           <StatusDot
             label="Initialized"
             active={pool.initialized}
+            activeColor="bg-[var(--dbx-green-600)]"
+          />
+          <StatusDot
+            label="Auto-scale"
+            active={pool.auto_scale?.enabled ?? false}
             activeColor="bg-[var(--dbx-green-600)]"
           />
           <StatusDot
@@ -495,6 +507,7 @@ async function runSingleCheck(check: HealthCheck): Promise<HealthCheck> {
               initialized: data.stream_pool.initialized ?? false,
               inflight_requests: data.stream_pool.inflight_requests ?? 0,
               draining: data.stream_pool.draining ?? false,
+              auto_scale: data.stream_pool.auto_scale ?? undefined,
             }
           : undefined;
 

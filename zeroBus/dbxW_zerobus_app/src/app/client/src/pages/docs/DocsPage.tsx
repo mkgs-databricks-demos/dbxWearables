@@ -119,7 +119,7 @@ function StreamingArchitecture() {
                 {
                   title: 'SDK Stream Pool (what happens inside)',
                   items: [
-                    'N persistent gRPC streams (configurable)',
+                    'Auto-scaling gRPC stream pool (scales with load)',
                     'Round-robin stream selection per request',
                     'SDK-managed OAuth token refresh',
                     'Offset-based durability (waitForOffset)',
@@ -150,7 +150,8 @@ function StreamingArchitecture() {
             <p className="text-sm text-[var(--muted-foreground)] leading-relaxed mb-4">
               The stream pool architecture is designed for millions of concurrent iOS users.
               Each gRPC stream handles many records per second with automatic batching and
-              flow control. Scaling strategy: increase the pool size to open more connections.
+              flow control. The pool auto-scales with demand — adding streams under load
+              and removing idle ones — within configurable min/max bounds.
             </p>
 
             <div className="border border-[var(--border)] rounded-lg overflow-hidden">
@@ -164,7 +165,7 @@ function StreamingArchitecture() {
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
                   {[
-                    ['Pool Size', 'ZEROBUS_STREAM_POOL_SIZE', 'Number of concurrent gRPC streams (dev=2, prod=4+)'],
+                    ['Pool Size', 'Auto-scale (min–max)', 'Auto-scales gRPC streams based on load (manual resize also supported)'],
                     ['Recovery', 'Automatic', 'SDK reconnects and replays unacked batches on transient failures'],
                     ['Durability', 'Offset-based', 'HTTP response sent only after server acknowledges the record'],
                     ['Auth', 'SDK-managed OAuth', 'M2M client credentials with automatic token refresh'],
@@ -211,10 +212,10 @@ function StreamingArchitecture() {
                   desc: 'The stream pool is created on the first ingest request, not at server startup. This means the first request takes ~900ms (pool creation + gRPC handshakes). Subsequent requests are 100-200ms.',
                 },
                 {
-                  severity: 'Planned',
-                  severityColor: 'bg-gray-100 text-gray-500',
-                  title: 'No dynamic pool scaling',
-                  desc: 'Pool size is fixed at startup via ZEROBUS_STREAM_POOL_SIZE. Dynamic scaling based on request load is not yet implemented.',
+                  severity: 'Active',
+                  severityColor: 'bg-emerald-50 text-emerald-600',
+                  title: 'Dynamic pool auto-scaling',
+                  desc: 'The stream pool auto-scales based on request load — adding streams when in-flight requests exceed capacity and removing idle streams after a cooldown period. Configurable min/max bounds with manual resize also supported.',
                 },
               ].map((item, i) => (
                 <div key={i} className="flex items-start gap-3 bg-[var(--muted)] rounded-lg p-4">

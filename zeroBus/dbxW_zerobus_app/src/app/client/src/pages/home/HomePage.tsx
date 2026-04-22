@@ -274,7 +274,7 @@ function ZeroBusSection() {
                 'Offset-based durability — response sent after server ack',
                 'SDK-managed OAuth2 with automatic token refresh',
                 'Automatic recovery — replays unacked batches on failure',
-                'Configurable pool size per environment (dev=2, prod=4+)',
+                'Auto-scaling stream pool — grows under load, shrinks when idle',
                 'Schema-on-read with VARIANT column in Unity Catalog',
               ].map((item, i) => (
                 <div key={i} className="flex items-start gap-3">
