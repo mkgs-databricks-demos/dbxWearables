@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   History, ChevronDown, ChevronUp,
   User, ArrowUpDown, RefreshCw,
@@ -126,9 +126,12 @@ export function LoadTestHistory({ refreshTrigger = 0 }: LoadTestHistoryProps) {
   const [expandedRun, setExpandedRun] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>('started_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const isFirstLoad = useRef(true);
 
   const fetchHistory = useCallback(async () => {
-    setLoading(true);
+    // Only show full loading spinner on very first fetch.
+    // Background polls update data silently to avoid a distracting flash.
+    if (isFirstLoad.current) setLoading(true);
     setError(null);
     try {
       const res = await fetch('/api/v1/testing/history?limit=50');
@@ -136,14 +139,6 @@ export function LoadTestHistory({ refreshTrigger = 0 }: LoadTestHistoryProps) {
       const data = await res.json();
       const fetched: HistoryRun[] = data.runs ?? [];
       setRuns(fetched);
-
-      // Auto-expand the most recently completed (or running) run
-      const mostRecent = fetched.find(
-        (r) => r.status === 'running' || r.status === 'complete',
-      );
-      if (mostRecent) {
-        setExpandedRun(mostRecent.run_id);
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -205,7 +200,7 @@ export function LoadTestHistory({ refreshTrigger = 0 }: LoadTestHistoryProps) {
   };
 
   return (
-    <div className="mt-10">
+    <div className="mt-10 mb-8">
       {/* Section Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
@@ -237,7 +232,7 @@ export function LoadTestHistory({ refreshTrigger = 0 }: LoadTestHistoryProps) {
       )}
 
       {/* Loading state */}
-      {loading && !error && (
+      {loading && isFirstLoad.current && !error && (
         <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-12 text-center">
           <RefreshCw className="h-8 w-8 mx-auto mb-3 animate-spin text-[var(--muted-foreground)]" />
           <p className="text-sm text-[var(--muted-foreground)]">Loading history...</p>
@@ -257,11 +252,12 @@ export function LoadTestHistory({ refreshTrigger = 0 }: LoadTestHistoryProps) {
       )}
 
       {/* Timeline Table */}
-      {!loading && runs.length > 0 && (
+      {runs.length > 0 && (
         <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl overflow-hidden">
+          <div className="max-h-[360px] overflow-y-auto">
           <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[var(--border)] bg-[var(--muted)]/30">
+            <thead className="sticky top-0 z-10">
+              <tr className="border-b border-[var(--border)] bg-[var(--card)]">
                 <th
                   className="text-left px-4 py-3 font-bold text-xs text-[var(--muted-foreground)] cursor-pointer hover:text-[var(--foreground)]"
                   onClick={() => toggleSort('started_at')}
@@ -412,6 +408,7 @@ export function LoadTestHistory({ refreshTrigger = 0 }: LoadTestHistoryProps) {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>

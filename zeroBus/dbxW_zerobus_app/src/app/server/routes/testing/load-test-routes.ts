@@ -187,7 +187,7 @@ export async function setupLoadTestRoutes(appkit: AppKitServer) {
               presetLabel: body.presetLabel ?? 'Custom',
               batchSize,
               totalPayloads,
-              poolSizeStart: poolBefore.active,
+              poolSizeStart: poolBefore.pool_size,
               autoScaleEnabled: autoScaleBefore.enabled,
               autoScaleMin: autoScaleBefore.config?.minSize,
               autoScaleMax: autoScaleBefore.config?.maxSize,

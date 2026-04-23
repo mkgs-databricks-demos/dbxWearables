@@ -2,6 +2,7 @@
 
 | Date | Session | File |
 | --- | --- | --- |
+| 2026-04-23 | Load Test History UX Refinements (reorder, polling, auto-expand) | [2026-04-23_load-test-history-ux-refinements.md](2026-04-23_load-test-history-ux-refinements.md) |
 | 2026-04-23 | Load Test History Implementation (Lakebase + Lakehouse Sync) | [2026-04-23_load-test-history-implementation.md](2026-04-23_load-test-history-implementation.md) |
 | 2026-04-22 | Frontend Auto-Scale Stale Reference Cleanup | [2026-04-22_frontend-autoscale-stale-references.md](2026-04-22_frontend-autoscale-stale-references.md) |
 | 2026-04-21 | Dynamic Pool Resize, Auto-Scaling, Per-Preset Batch Sizes, Proxy Timeout Handling & Variable Sample Generation | [2026-04-21_dynamic-pool-resize-autoscale.md](2026-04-21_dynamic-pool-resize-autoscale.md) |

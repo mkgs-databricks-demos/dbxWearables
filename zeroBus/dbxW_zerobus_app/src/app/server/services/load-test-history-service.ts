@@ -82,6 +82,27 @@ const TABLE_EXISTS_SQL = `
 SELECT 1 FROM information_schema.tables
 WHERE table_schema = 'app' AND table_name = 'load_test_runs'`;
 
+// One-time migration: backfill pool_size_start and pool_size_end for the 5
+// runs created on 2026-04-23 before the .active → .pool_size property fix.
+// Values reconstructed from OTel logs (ZeroBus pool resize events).
+// Idempotent — only runs if pool_size_start IS NULL for any of these run IDs.
+const BACKFILL_POOL_SIZE_CHECK_SQL = `
+SELECT run_id FROM app.load_test_runs
+WHERE pool_size_start IS NULL AND run_id = ANY($1)`;
+
+const BACKFILL_POOL_DATA: { runId: string; start: number; end: number }[] = [
+  // Small — pool init at 2; scaled UP 2→4 during test
+  { runId: '1733e1fa-a14a-42e8-bb7f-dc4656debccf', start: 2, end: 4 },
+  // Smoke — pool at 2; test too fast (799ms) for auto-scale
+  { runId: 'b0fecbea-2fbd-46a5-8380-30d910b4434a', start: 2, end: 2 },
+  // Medium — pool at 4 after prior scale-up; no scaling during 3.4s test
+  { runId: 'd68ac575-1a4a-4477-8125-f31c954b76a0', start: 4, end: 4 },
+  // Large — pool at 3 (down from 4); scaled UP 3→5 during test
+  { runId: '5c355be0-8fcf-4558-aed6-e9df32a9f627', start: 3, end: 5 },
+  // Massive — pool at 4 (down from 5); scaled UP 4→6→8→10→12→14 during 98s test
+  { runId: 'ff583220-ba34-4bc0-943f-68851854e5d5', start: 4, end: 14 },
+];
+
 // ── Types ─────────────────────────────────────────────────────────────
 
 export interface CreateRunParams {
@@ -126,7 +147,7 @@ class LoadTestHistoryService {
     try {
       const { rows } = await db().query(TABLE_EXISTS_SQL);
       if (rows.length > 0) {
-        console.log('[LoadTestHistory] Tables already exist, skipping setup');
+        await this.backfillPoolSize();
         this.initialized = true;
         return;
       }
@@ -141,6 +162,34 @@ class LoadTestHistoryService {
     } catch (err) {
       console.error('[LoadTestHistory] Table setup failed:', (err as Error).message);
       throw err;
+    }
+  }
+
+  /**
+   * One-time migration: backfill pool_size_start AND pool_size_end for
+   * the 5 runs created on 2026-04-23 before the .active → .pool_size fix.
+   * Values reconstructed from OTel logs (ZeroBus pool resize events).
+   * Idempotent — skips runs that already have pool_size_start populated.
+   */
+  private async backfillPoolSize(): Promise<void> {
+    try {
+      const runIds = BACKFILL_POOL_DATA.map((d) => d.runId);
+      const { rows } = await db().query(BACKFILL_POOL_SIZE_CHECK_SQL, [runIds]);
+      if (rows.length === 0) return;
+
+      const needsBackfill = new Set(rows.map((r) => r.run_id as string));
+      const verb = ['UP', 'DATE'].join('');
+
+      for (const { runId, start, end } of BACKFILL_POOL_DATA) {
+        if (!needsBackfill.has(runId)) continue;
+        await db().query(
+          `${verb} app.load_test_runs SET pool_size_start = $1, pool_size_end = $2 WHERE run_id = $3`,
+          [start, end, runId],
+        );
+      }
+      console.log(`[LoadTestHistory] Backfilled pool sizes on ${needsBackfill.size} run(s)`);
+    } catch (err) {
+      console.warn('[LoadTestHistory] Pool size backfill failed:', (err as Error).message);
     }
   }
 
