@@ -107,9 +107,19 @@ function presetBadge(label: string | null) {
   );
 }
 
+// ── Props ──────────────────────────────────────────────────────────
+
+interface LoadTestHistoryProps {
+  /**
+   * Increment this counter to trigger a history refresh from the parent.
+   * Used to refresh after a test starts (shows 'running') or completes.
+   */
+  refreshTrigger?: number;
+}
+
 // ── Component ─────────────────────────────────────────────────────────
 
-export function LoadTestHistory() {
+export function LoadTestHistory({ refreshTrigger = 0 }: LoadTestHistoryProps) {
   const [runs, setRuns] = useState<HistoryRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -124,7 +134,16 @@ export function LoadTestHistory() {
       const res = await fetch('/api/v1/testing/history?limit=50');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      setRuns(data.runs ?? []);
+      const fetched: HistoryRun[] = data.runs ?? [];
+      setRuns(fetched);
+
+      // Auto-expand the most recently completed (or running) run
+      const mostRecent = fetched.find(
+        (r) => r.status === 'running' || r.status === 'complete',
+      );
+      if (mostRecent) {
+        setExpandedRun(mostRecent.run_id);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -132,8 +151,15 @@ export function LoadTestHistory() {
     }
   }, []);
 
+  // Initial fetch + refresh whenever refreshTrigger increments
   useEffect(() => {
     fetchHistory();
+  }, [fetchHistory, refreshTrigger]);
+
+  // Poll every 10s so all users see running / completed tests in near-real-time
+  useEffect(() => {
+    const id = setInterval(() => fetchHistory(), 10_000);
+    return () => clearInterval(id);
   }, [fetchHistory]);
 
   // Sort runs client-side
