@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useCallback, useRef } from 'react';
+import { Fragment, useState, useEffect, useCallback } from 'react';
 import {
   History, ChevronDown, ChevronUp,
   User, ArrowUpDown, RefreshCw,
@@ -107,56 +107,24 @@ function presetBadge(label: string | null) {
   );
 }
 
-// ── Props ──────────────────────────────────────────────────────────
-
-interface LoadTestHistoryProps {
-  /**
-   * Increment this counter to trigger a history refresh from the parent.
-   * Used to refresh after a test starts (shows 'running') or completes.
-   */
-  refreshTrigger?: number;
-}
-
 // ── Component ─────────────────────────────────────────────────────────
 
-export function LoadTestHistory({ refreshTrigger = 0 }: LoadTestHistoryProps) {
+export function LoadTestHistory() {
   const [runs, setRuns] = useState<HistoryRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedRun, setExpandedRun] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>('started_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
-  const isFirstLoad = useRef(true);
 
   const fetchHistory = useCallback(async () => {
-    // Only show full loading spinner on very first fetch.
-    // Background polls update data silently to avoid a distracting flash.
-    if (isFirstLoad.current) setLoading(true);
+    setLoading(true);
     setError(null);
     try {
       const res = await fetch('/api/v1/testing/history?limit=50');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      const fetched: HistoryRun[] = data.runs ?? [];
-
-      // Only update state when data actually changed — avoids unnecessary
-      // React re-renders that cause visible table flicker.
-      setRuns((prev) => {
-        if (prev.length !== fetched.length) return fetched;
-        const changed = fetched.some((r, i) => {
-          const p = prev[i];
-          return (
-            r.run_id !== p.run_id ||
-            r.status !== p.status ||
-            r.total_records !== p.total_records ||
-            r.records_per_sec !== p.records_per_sec ||
-            r.duration_ms !== p.duration_ms ||
-            r.pool_size_start !== p.pool_size_start ||
-            r.pool_size_end !== p.pool_size_end
-          );
-        });
-        return changed ? fetched : prev;
-      });
+      setRuns(data.runs ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -164,15 +132,9 @@ export function LoadTestHistory({ refreshTrigger = 0 }: LoadTestHistoryProps) {
     }
   }, []);
 
-  // Initial fetch + refresh whenever refreshTrigger increments
+  // Fetch once on mount — user clicks Refresh button for updates
   useEffect(() => {
     fetchHistory();
-  }, [fetchHistory, refreshTrigger]);
-
-  // Poll every 10s so all users see running / completed tests in near-real-time
-  useEffect(() => {
-    const id = setInterval(() => fetchHistory(), 10_000);
-    return () => clearInterval(id);
   }, [fetchHistory]);
 
   // Sort runs client-side
@@ -250,7 +212,7 @@ export function LoadTestHistory({ refreshTrigger = 0 }: LoadTestHistoryProps) {
       )}
 
       {/* Loading state */}
-      {loading && isFirstLoad.current && !error && (
+      {loading && !error && (
         <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-12 text-center">
           <RefreshCw className="h-8 w-8 mx-auto mb-3 animate-spin text-[var(--muted-foreground)]" />
           <p className="text-sm text-[var(--muted-foreground)]">Loading history...</p>

@@ -5,13 +5,17 @@
 
 ### Summary
 
-Six rounds of changes to the Load Test History feature, following the earlier Lakebase + Lakehouse Sync implementation session:
+Nine rounds of changes to the Load Test History feature, following the earlier Lakebase + Lakehouse Sync implementation session:
 
 1. **History section moved above controls** — users see the run timeline first, before the preset/config/start-test panel
 2. **Cross-user real-time refresh** — history table updates for *all* viewers when any user starts or completes a test, via `refreshTrigger` prop bump (instant for the triggering user) and 10-second polling (for other viewers)
 3. **Polish: spacing, flash suppression, fixed-height scroll** — added bottom margin between history and controls, eliminated loading flash on background refresh, limited table to \~5 visible rows with sticky header
 4. **Auto-expand removed** — defaulting to all rows collapsed per user feedback
 5. **Pool size bug fix + backfill** — `pool_size_start` and `pool_size_end` were always NULL due to a property name mismatch; fixed for future runs and backfilled 5 historical runs with values reconstructed from OTel logs
+6. **Table flash elimination** — fixed React key anti-pattern (keyless Fragment in `.map()`) and added diff-based `setRuns` to skip re-renders when polled data is unchanged
+7. **pool_size_end still NULL** — the `.active` → `.pool_size` fix from Round 5 only persisted for the `createRun` call site; the two `completeRun` call sites had to be re-fixed
+8. **TS2686 build error** — `React.Fragment` references failed because project uses `jsx: "react-jsx"` (automatic runtime); switched to named `Fragment` import
+9. **Auto-refresh removed** — despite multiple rounds of flash suppression (isFirstLoad gate, diff-based setRuns, keyed Fragments), the table still flashed. Removed all auto-refresh machinery (polling, refreshTrigger prop, bumpHistory callbacks). History now fetches on mount only; users click Refresh for updates.
 
 ---
 
@@ -108,13 +112,71 @@ Note: the initial generic backfill (`pool_size_start = auto_scale_min`) was only
 
 ---
 
-### Files Modified
+### Round 7: TS2686 Build Error (React.Fragment)
+
+The `<React.Fragment key={...}>` references from Round 6 caused TypeScript error TS2686: `'React' refers to a UMD global, but the current file is a module`. The project uses `jsx: "react-jsx"` (automatic runtime), which doesn't put `React` in scope.
+
+**Fix:** Changed `import React` to named import `import { Fragment }` from `'react'`, and `<React.Fragment>` / `</React.Fragment>` to `<Fragment>` / `</Fragment>`.
+
+---
+
+### Round 8: pool_size_end Fix (Incomplete Persistence from Round 5)
+
+After deploying Round 5's fix, `pool_size_start` populated correctly but `pool_size_end` was still NULL. Verified via OTel logs that the deployment succeeded but pool_size_end wasn't being written.
+
+**Root cause:** The `.active` → `.pool_size` fix from Round 5 only persisted for the `createRun` call site (line 190). The two `completeRun` call sites (lines 235 and 279) still had `.active`.
+
+| Call Site | Line | After Round 5 | After Round 8 |
+| --- | --- | --- | --- |
+| `createRun` (test start) | 190 | `.pool_size` | Already correct |
+| `completeRun` (abort) | 235 | Still `.active` | Fixed → `.pool_size` |
+| `completeRun` (complete) | 279 | Still `.active` | Fixed → `.pool_size` |
+
+---
+
+### Round 9: Auto-Refresh Removed (Back to Manual Refresh)
+
+#### Problem
+
+Despite four rounds of flash suppression attempts (Round 2: `isFirstLoad` gate; Round 3: `!loading` condition removed from table; Round 6: keyed Fragments + diff-based `setRuns`; Round 7: `Fragment` import fix), the history table still flashed visibly during auto-refresh cycles. The table appeared to completely rebuild on each poll/trigger.
+
+#### Decision
+
+Rather than continuing to chase the rendering issue, removed all auto-refresh machinery entirely. The history table now fetches once on mount and updates only when the user explicitly clicks the Refresh button.
+
+#### What was removed
+
+**`LoadTestHistory.tsx`:**
+- `LoadTestHistoryProps` interface and `refreshTrigger` prop — component now takes no props
+- `isFirstLoad` ref and conditional `setLoading`
+- `setInterval` 10-second polling `useEffect`
+- Diff-based `setRuns` functional updater (reverted to simple `setRuns(data.runs ?? [])`)
+- `isFirstLoad.current` guard on loading spinner condition (reverted to `loading && !error`)
+- `useRef` import removed
+
+**`LoadTestPage.tsx`:**
+- `historyRefresh` state and `setHistoryRefresh` setter
+- `bumpHistory` callback (`useCallback(() => setHistoryRefresh(n => n + 1), [])`)
+- Three `bumpHistory()` call sites: after `setState({ phase: 'running' })`, in SSE `complete` handler, in `finally` block
+- `refreshTrigger={historyRefresh}` prop on `<LoadTestHistory />` — now renders as `<LoadTestHistory />`
+- `bumpHistory` removed from `runTest` dependency array
+
+#### What was kept
+
+- `<Fragment key={run.run_id}>` keyed Fragments (good React practice regardless)
+- Fixed-height scroll container (`max-h-[360px] overflow-y-auto`) with sticky header
+- `mb-8` spacing between history and controls
+- Manual Refresh button (always present, calls `fetchHistory()` on click)
+
+---
+
+### Files Modified (Final State)
 
 | File | Change Type |
 | --- | --- |
-| `client/src/pages/testing/LoadTestHistory.tsx` | Props interface, refreshTrigger/polling useEffects, isFirstLoad flash suppression, fixed-height scroll container, sticky header, auto-expand removed, mb-8 spacing |
-| `client/src/pages/testing/LoadTestPage.tsx` | historyRefresh state, bumpHistory callback, JSX reorder (history above grid), 3× bumpHistory() calls |
-| `server/routes/testing/load-test-routes.ts` | `.active` → `.pool_size` at 3 call sites |
+| `client/src/pages/testing/LoadTestHistory.tsx` | Simplified to fetch-on-mount + manual Refresh; keyed `Fragment`; fixed-height scroll container; sticky header; mb-8 spacing; no props, no polling, no auto-refresh |
+| `client/src/pages/testing/LoadTestPage.tsx` | JSX reorder (history above grid); all auto-refresh state/callbacks removed; `<LoadTestHistory />` with no props |
+| `server/routes/testing/load-test-routes.ts` | `.active` → `.pool_size` at all 3 call sites (Round 5 fixed line 190; Round 8 fixed lines 235 + 279) |
 | `server/services/load-test-history-service.ts` | BACKFILL_POOL_DATA constant, BACKFILL_POOL_SIZE_CHECK_SQL, backfillPoolSize() method, wired into ensureTables() |
 
 ### Not Changed
@@ -125,10 +187,16 @@ Note: the initial generic backfill (`pool_size_start = auto_scale_min`) was only
 
 ### Testing Considerations
 
-- Open Load Test page in two browser tabs (same or different users)
-- Start test in Tab A → Tab B shows `running` row within \~10s (polling); Tab A sees instant update
-- No loading flash during 10s polling cycles — data swaps silently
-- History table shows \~5 rows with scroll; header stays pinned
-- All rows start collapsed; click to expand
+- History table shows \~5 rows with scroll; header stays pinned while scrolling
+- All rows start collapsed; click to expand for per-type breakdown
 - Clear spacing gap between history section and Scale Presets / Start Load Test
-- After deploy: verify `pool_size_start` and `pool_size_end` populate on new runs AND are backfilled on the 5 historical runs (check `[LoadTestHistory] Backfilled pool sizes on 5 run(s)` log line)
+- **No auto-refresh** — user clicks Refresh button to see new runs after a test completes
+- Verify `pool_size_start` AND `pool_size_end` both populate on new runs
+- Verify backfill ran on the 5 historical runs (check `[LoadTestHistory] Backfilled pool sizes on 5 run(s)` log line)
+- No TypeScript build errors (TS2686 fixed with named `Fragment` import)
+
+### Lessons Learned
+
+- **React auto-refresh in tables is deceptively hard.** Even with proper keys, diff-based state updates, and conditional loading gates, the table still flashed. Possible deeper causes: the `<table>` DOM structure with conditional expanded rows; the `sortedRuns` re-sort creating new array references on every render; or Tailwind CSS class recalculation. A production solution would likely need `React.memo` on row components, `useMemo` on sorted arrays, or a virtualized table library.
+- **File edits in multi-patch batches can silently fail.** When applying multiple patches in a single `editAsset` call, some patches may not persist even though the API returns success. For critical changes, verify each patch individually and re-apply as needed.
+- **Property name mismatches in untyped JS objects are silent killers.** `poolStatus().active` vs `.pool_size` — TypeScript's return type annotation had the correct property name, but the call sites used a different name. The `any`-like nature of the destructured object meant no compile-time error; the value was simply `undefined` → `null` in Postgres.

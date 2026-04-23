@@ -120,8 +120,6 @@ export function LoadTestPage() {
   const [batchSize, setBatchSize] = useState(500);
   const [activePreset, setActivePreset] = useState(1);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const [historyRefresh, setHistoryRefresh] = useState(0);
-  const bumpHistory = useCallback(() => setHistoryRefresh((n) => n + 1), []);
 
   const [state, setState] = useState<TestState>({
     phase: 'idle',
@@ -259,8 +257,6 @@ export function LoadTestPage() {
       recordsPerSec: 0,
       perType: new Map(),
     });
-    // Immediate history refresh so all viewers see the new 'running' entry
-    bumpHistory();
 
     try {
       const response = await fetch('/api/v1/testing/load-test/stream', {
@@ -341,9 +337,8 @@ export function LoadTestPage() {
               recordsPerSec: parsed.recordsPerSec,
               perType: typeMap,
             });
-            // Refresh pool status + history after test completes
+            // Refresh pool status after test completes
             fetchPoolStatus();
-            bumpHistory();
           } else if (eventType === 'error') {
             setState((prev) => ({
               ...prev,
@@ -381,9 +376,8 @@ export function LoadTestPage() {
     } finally {
       abortControllerRef.current = null;
       fetchPoolStatus();
-      bumpHistory();
     }
-  }, [counts, batchSize, bumpHistory]);
+  }, [counts, batchSize]);
 
   const stopTest = useCallback(() => {
     abortControllerRef.current?.abort();
@@ -408,7 +402,7 @@ export function LoadTestPage() {
       </div>
 
       {/* ── History Section (above controls) ─────────────────────── */}
-      <LoadTestHistory refreshTrigger={historyRefresh} />
+      <LoadTestHistory />
 
       <div className="grid lg:grid-cols-3 gap-8">
         {/* ── Left column: Configuration ─────────────────────────── */}
