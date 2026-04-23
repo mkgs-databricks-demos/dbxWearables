@@ -263,6 +263,10 @@ class ZeroBusService {
       newSize: this.streams.length,
       durationMs: 0,
     });
+
+    // Auto-enable auto-scale after pool initialization so both load tests
+    // and real HealthKit ingest benefit from dynamic stream management.
+    this.enableAutoScale();
   }
 
   /**

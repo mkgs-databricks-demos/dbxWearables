@@ -143,7 +143,7 @@ export function LoadTestPage() {
   const [poolTarget, setPoolTarget] = useState(4);
   const [poolResizing, setPoolResizing] = useState(false);
   const [poolError, setPoolError] = useState('');
-  const [autoScaleEnabled, setAutoScaleEnabled] = useState(false);
+  const [autoScaleEnabled, setAutoScaleEnabled] = useState(true);
   const [autoScaleMin, setAutoScaleMin] = useState(2);
   const [autoScaleMax, setAutoScaleMax] = useState(16);
   const [autoScaleToggling, setAutoScaleToggling] = useState(false);
