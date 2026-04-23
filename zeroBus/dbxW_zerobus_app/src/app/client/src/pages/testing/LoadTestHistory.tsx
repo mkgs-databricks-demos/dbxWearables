@@ -138,7 +138,25 @@ export function LoadTestHistory({ refreshTrigger = 0 }: LoadTestHistoryProps) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const fetched: HistoryRun[] = data.runs ?? [];
-      setRuns(fetched);
+
+      // Only update state when data actually changed — avoids unnecessary
+      // React re-renders that cause visible table flicker.
+      setRuns((prev) => {
+        if (prev.length !== fetched.length) return fetched;
+        const changed = fetched.some((r, i) => {
+          const p = prev[i];
+          return (
+            r.run_id !== p.run_id ||
+            r.status !== p.status ||
+            r.total_records !== p.total_records ||
+            r.records_per_sec !== p.records_per_sec ||
+            r.duration_ms !== p.duration_ms ||
+            r.pool_size_start !== p.pool_size_start ||
+            r.pool_size_end !== p.pool_size_end
+          );
+        });
+        return changed ? fetched : prev;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -305,9 +323,8 @@ export function LoadTestHistory({ refreshTrigger = 0 }: LoadTestHistoryProps) {
                 const isExpanded = expandedRun === run.run_id;
 
                 return (
-                  <>
+                  <React.Fragment key={run.run_id}>
                     <tr
-                      key={run.run_id}
                       className="border-b border-[var(--border)] hover:bg-[var(--muted)]/20 cursor-pointer transition-colors"
                       onClick={() => setExpandedRun(isExpanded ? null : run.run_id)}
                     >
@@ -403,7 +420,7 @@ export function LoadTestHistory({ refreshTrigger = 0 }: LoadTestHistoryProps) {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </React.Fragment>
                 );
               })}
             </tbody>

@@ -232,7 +232,7 @@ export async function setupLoadTestRoutes(appkit: AppKitServer) {
                 loadTestHistoryService.completeRun(runId, {
                   status: 'aborted',
                   errorMessage: 'Client disconnected',
-                  poolSizeEnd: zeroBusService.poolStatus().active,
+                  poolSizeEnd: zeroBusService.poolStatus().pool_size,
                 }).catch(() => {});
               }
             }
@@ -276,7 +276,7 @@ export async function setupLoadTestRoutes(appkit: AppKitServer) {
                 totalRecords: result.totalRecords,
                 recordsPerSec: result.recordsPerSec,
                 durationMs: result.totalDurationMs,
-                poolSizeEnd: poolAfter.active,
+                poolSizeEnd: poolAfter.pool_size,
               });
               // Write per-type breakdown
               if (result.perType) {

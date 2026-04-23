@@ -5,7 +5,7 @@
 
 ### Summary
 
-Four rounds of changes to the Load Test History feature, following the earlier Lakebase + Lakehouse Sync implementation session:
+Six rounds of changes to the Load Test History feature, following the earlier Lakebase + Lakehouse Sync implementation session:
 
 1. **History section moved above controls** — users see the run timeline first, before the preset/config/start-test panel
 2. **Cross-user real-time refresh** — history table updates for *all* viewers when any user starts or completes a test, via `refreshTrigger` prop bump (instant for the triggering user) and 10-second polling (for other viewers)
