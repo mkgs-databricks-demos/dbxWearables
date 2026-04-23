@@ -73,6 +73,7 @@
 //   (compatible with iOS APIResponse.swift — unknown keys ignored)
 
 import express from 'express';
+import { extractUser } from '../../utils/extract-user.js';
 import type { Application, Request, Response, NextFunction } from 'express';
 import { zeroBusService } from '../../services/zerobus-service';
 import type { WearablesRecord } from '../../services/zerobus-service';
@@ -184,51 +185,9 @@ function extractNdjsonBody(req: Request): string {
   return '';
 }
 
-/**
- * Extract user identity — priority-ordered, 3-way branch.
- *
- * 1. Authorization: Bearer <token>
- *    If present, the request came directly from a mobile client (iOS/
- *    Android) — AppKit's proxy strips this header for workspace traffic.
- *    TODO: validate app-issued JWT signature, check expiry, extract
- *    `sub` claim (Lakebase users.user_id UUID). Until JWT validation is
- *    implemented, the token is logged but not trusted → 'anonymous'.
- *
- * 2. x-forwarded-email
- *    Workspace traffic (notebook, job, service). Injected by AppKit's
- *    reverse proxy after OAuth validation. Trustworthy — proxy strips
- *    any client-supplied x-forwarded-* headers before injecting its own.
- *    Value: user email (e.g. "matthew.giglia@databricks.com"), matches
- *    Spark SQL current_user().
- *
- * 3. Neither → 'anonymous'
- *    No authentication context. Pre-auth clients, health checks, or
- *    development/testing.
- */
-function extractUserFromToken(req: Request): string {
-  // ── Branch 1: Direct client with Bearer token (mobile app) ──────
-  const authHeader = req.headers['authorization'];
-  if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
-    // TODO: Replace this placeholder with real JWT validation:
-    //   1. Verify signature against app secret (from dbxw_zerobus_secrets scope)
-    //   2. Check exp claim (reject expired tokens)
-    //   3. Extract sub claim → Lakebase users.user_id UUID
-    //   4. Return the UUID as user_id
-    console.info(
-      '[ZeroBus] Bearer token received — JWT validation not yet implemented, user_id set to anonymous',
-    );
-    return 'anonymous';
-  }
-
-  // ── Branch 2: Workspace traffic via AppKit proxy ────────────────
-  const email = req.headers['x-forwarded-email'];
-  if (typeof email === 'string' && email.length > 0) {
-    return email;
-  }
-
-  // ── Branch 3: No auth context ───────────────────────────────────
-  return 'anonymous';
-}
+// extractUserFromToken() moved to server/utils/extract-user.ts as extractUser()
+// — shared across ingest-routes and load-test-routes for consistent user attribution.
+// See extract-user.ts for the full JSDoc (3-way branch: Bearer token, x-forwarded-email, anonymous).
 
 // ── AppKit interface (only the server plugin is needed) ────────────────
 
@@ -367,7 +326,7 @@ export async function setupZeroBusRoutes(appkit: AppKitServer) {
           const headers = extractHeaders(req);
           const sourcePlatform =
             (req.headers['x-platform'] as string | undefined)?.toLowerCase() || 'unknown';
-          const userId = extractUserFromToken(req);
+          const userId = extractUser(req);
           const records: WearablesRecord[] = lines.map((line) =>
             zeroBusService.buildRecord(line, headers, recordType, sourcePlatform, userId),
           );

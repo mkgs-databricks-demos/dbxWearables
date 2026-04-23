@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Play, Square, RefreshCw, Zap, Clock, BarChart3, Layers, ArrowUpCircle, ArrowDownCircle, Settings2, Sparkles } from 'lucide-react';
 import { BrandIcon } from '@/components/BrandIcon';
+import { LoadTestHistory } from './LoadTestHistory';
 import { type RecordType, RECORD_TYPES } from '@shared/synthetic-healthkit';
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -143,7 +144,7 @@ export function LoadTestPage() {
   const [poolTarget, setPoolTarget] = useState(4);
   const [poolResizing, setPoolResizing] = useState(false);
   const [poolError, setPoolError] = useState('');
-  const [autoScaleEnabled, setAutoScaleEnabled] = useState(false);
+  const [autoScaleEnabled, setAutoScaleEnabled] = useState(true);
   const [autoScaleMin, setAutoScaleMin] = useState(2);
   const [autoScaleMax, setAutoScaleMax] = useState(16);
   const [autoScaleToggling, setAutoScaleToggling] = useState(false);
@@ -264,7 +265,7 @@ export function LoadTestPage() {
         body: JSON.stringify({
           counts,
           batchSize,
-          userId: 'synthetic-load-test',
+          presetLabel: PRESETS[activePreset]?.label ?? 'Custom',
           sourcePlatform: 'synthetic',
         }),
         signal: abortController.signal,
@@ -399,6 +400,9 @@ export function LoadTestPage() {
           gRPC stream pool. Records bypass HTTP and write straight to the bronze table.
         </p>
       </div>
+
+      {/* ── History Section (above controls) ─────────────────────── */}
+      <LoadTestHistory />
 
       <div className="grid lg:grid-cols-3 gap-8">
         {/* ── Left column: Configuration ─────────────────────────── */}
@@ -847,6 +851,7 @@ export function LoadTestPage() {
           )}
         </div>
       </div>
+
     </div>
   );
 }

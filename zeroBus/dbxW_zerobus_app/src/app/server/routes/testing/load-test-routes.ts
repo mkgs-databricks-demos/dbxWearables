@@ -15,6 +15,8 @@ import type { Application, Request, Response } from 'express';
 import { syntheticDataService } from '../../services/synthetic-data-service.js';
 import { zeroBusService } from '../../services/zerobus-service.js';
 import { type RecordType, RECORD_TYPES } from '../../../shared/synthetic-healthkit.js';
+import { extractUser, extractClientIp } from '../../utils/extract-user.js';
+import { loadTestHistoryService } from '../../services/load-test-history-service.js';
 
 // ── AppKit interface ──────────────────────────────────────────────────
 
@@ -87,11 +89,14 @@ export async function setupLoadTestRoutes(appkit: AppKitServer) {
             `[LoadTest] Starting: ${totalPayloads} payloads across ${Object.keys(body.counts).length} type(s)`,
           );
 
+          // Extract real user identity server-side (not from client POST body)
+          const userId = extractUser(req);
+
           const result = await syntheticDataService.generateAndIngest(
             body.counts as Partial<Record<RecordType, number>>,
             {
               batchSize: body.batchSize ?? 500,
-              userId: body.userId ?? 'synthetic-load-test',
+              userId,
               sourcePlatform: body.sourcePlatform ?? 'synthetic',
             },
           );
@@ -160,9 +165,37 @@ export async function setupLoadTestRoutes(appkit: AppKitServer) {
             0,
           );
 
+          // Extract real user identity & context server-side
+          const userId = extractUser(req);
+          const userIp = extractClientIp(req);
+          const batchSize = body.batchSize ?? 500;
+
+          // Capture pool state before test
+          const poolBefore = zeroBusService.poolStatus();
+          const autoScaleBefore = zeroBusService.autoScaleStatus();
+
           console.log(
-            `[LoadTest/SSE] Starting: ${totalPayloads} payloads across ${Object.keys(body.counts).length} type(s)`,
+            `[LoadTest/SSE] Starting: ${totalPayloads} payloads across ${Object.keys(body.counts).length} type(s) (user: ${userId})`,
           );
+
+          // Create history record in Lakebase (non-fatal if it fails)
+          let runId: string | null = null;
+          try {
+            runId = await loadTestHistoryService.createRun({
+              userId,
+              userIp,
+              presetLabel: body.presetLabel ?? 'Custom',
+              batchSize,
+              totalPayloads,
+              poolSizeStart: poolBefore.pool_size,
+              autoScaleEnabled: autoScaleBefore.enabled,
+              autoScaleMin: autoScaleBefore.config?.minSize,
+              autoScaleMax: autoScaleBefore.config?.maxSize,
+              configuredTypes: body.counts as Partial<Record<string, number>>,
+            });
+          } catch (histErr) {
+            console.warn('[LoadTest/SSE] Failed to create history run:', (histErr as Error).message);
+          }
 
           // ── Set SSE headers ─────────────────────────────────────
           res.writeHead(200, {
@@ -193,6 +226,15 @@ export async function setupLoadTestRoutes(appkit: AppKitServer) {
               clientDisconnected = true;
               abortController.abort();
               console.log('[LoadTest/SSE] Client disconnected — aborting');
+
+              // Mark run as aborted in history
+              if (runId) {
+                loadTestHistoryService.completeRun(runId, {
+                  status: 'aborted',
+                  errorMessage: 'Client disconnected',
+                  poolSizeEnd: zeroBusService.poolStatus().pool_size,
+                }).catch(() => {});
+              }
             }
           });
 
@@ -213,8 +255,8 @@ export async function setupLoadTestRoutes(appkit: AppKitServer) {
           const result = await syntheticDataService.generateAndIngestStreaming(
             body.counts as Partial<Record<RecordType, number>>,
             {
-              batchSize: body.batchSize ?? 500,
-              userId: body.userId ?? 'synthetic-load-test',
+              batchSize,
+              userId,
               sourcePlatform: body.sourcePlatform ?? 'synthetic',
               signal: abortController.signal,
               onProgress: (event) => writeEvent('progress', event),
@@ -224,6 +266,26 @@ export async function setupLoadTestRoutes(appkit: AppKitServer) {
           console.log(
             `[LoadTest/SSE] Complete: ${result.totalRecords} records in ${result.totalDurationMs}ms (${result.recordsPerSec} rec/s)`,
           );
+
+          // Update history with final results (Lakehouse Sync handles UC replication)
+          if (runId) {
+            const poolAfter = zeroBusService.poolStatus();
+            try {
+              await loadTestHistoryService.completeRun(runId, {
+                status: 'complete',
+                totalRecords: result.totalRecords,
+                recordsPerSec: result.recordsPerSec,
+                durationMs: result.totalDurationMs,
+                poolSizeEnd: poolAfter.pool_size,
+              });
+              // Write per-type breakdown
+              if (result.perType) {
+                await loadTestHistoryService.upsertTypeResults(runId, result.perType);
+              }
+            } catch (histErr) {
+              console.warn('[LoadTest/SSE] Failed to update history:', (histErr as Error).message);
+            }
+          }
 
           writeEvent('complete', { status: 'success', ...result });
           if (!clientDisconnected) {
@@ -381,5 +443,50 @@ export async function setupLoadTestRoutes(appkit: AppKitServer) {
     app.get('/api/v1/testing/health', (_req: Request, res: Response) => {
       res.json({ status: 'ok', service: 'synthetic-load-test' });
     });
+
+
+    // ── GET /api/v1/testing/history ──────────────────────────────────
+    //
+    // Returns paginated load test history from Lakebase.
+    // Query params: ?limit=50&offset=0
+
+    app.get(
+      '/api/v1/testing/history',
+      async (req: Request, res: Response) => {
+        try {
+          const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+          const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+          const runs = await loadTestHistoryService.listRuns(limit, offset);
+          res.json({ status: 'ok', runs, limit, offset });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error('[LoadTest/History] List failed:', message);
+          res.status(500).json({ status: 'error', message });
+        }
+      },
+    );
+
+
+    // ── GET /api/v1/testing/history/:runId ───────────────────────────
+    //
+    // Returns a single run with per-type breakdown.
+
+    app.get(
+      '/api/v1/testing/history/:runId',
+      async (req: Request, res: Response) => {
+        try {
+          const run = await loadTestHistoryService.getRun(req.params.runId);
+          if (!run) {
+            res.status(404).json({ status: 'error', message: 'Run not found' });
+            return;
+          }
+          res.json({ status: 'ok', ...run });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error('[LoadTest/History] Get failed:', message);
+          res.status(500).json({ status: 'error', message });
+        }
+      },
+    );
   });
 }

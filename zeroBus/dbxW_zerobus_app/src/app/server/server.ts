@@ -2,6 +2,7 @@ import { createApp, lakebase, server } from '@databricks/appkit';
 import { setupSampleLakebaseRoutes } from './routes/lakebase/todo-routes';
 import { setupZeroBusRoutes } from './routes/zerobus/ingest-routes';
 import { setupLoadTestRoutes } from './routes/testing/load-test-routes';
+import { setLakebaseClient } from './services/load-test-history-service.js';
 
 createApp({
   plugins: [
@@ -10,6 +11,9 @@ createApp({
   ],
 })
   .then(async (appkit) => {
+    // Wire Lakebase client into the load test history service
+    setLakebaseClient(appkit.lakebase);
+
     // Lakebase CRUD routes (sample scaffold)
     await setupSampleLakebaseRoutes(appkit);
 
