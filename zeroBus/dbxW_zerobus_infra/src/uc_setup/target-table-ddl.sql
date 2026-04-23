@@ -145,3 +145,51 @@ SHOW GRANTS ON TABLE wearables_zerobus;
 
 -- DBTITLE 1,Show Table Definition
 SHOW CREATE TABLE wearables_zerobus;
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Lakehouse Sync — Current-State Views for Load Test History
+-- MAGIC %md
+-- MAGIC ## Lakehouse Sync — Current-State Views for Load Test History
+-- MAGIC
+-- MAGIC The `dbxW_zerobus_app` AppKit application writes load test metadata to **Lakebase** (Postgres) tables:
+-- MAGIC - `app.load_test_runs` — one row per test run
+-- MAGIC - `app.load_test_type_results` — one row per record type per run
+-- MAGIC
+-- MAGIC **Lakehouse Sync** (wal2delta CDC) automatically replicates every INSERT/UPDATE/DELETE to UC Delta tables:
+-- MAGIC - `lb_load_test_runs_history` — SCD Type 2 change log
+-- MAGIC - `lb_load_test_type_results_history` — SCD Type 2 change log
+-- MAGIC
+-- MAGIC The views below deduplicate the SCD history to expose the **latest state** of each row, excluding deleted rows. They use `ROW_NUMBER()` partitioned by the primary key, ordered by `_lsn DESC` (Postgres Log Sequence Number) to pick the most recent change.
+-- MAGIC
+-- MAGIC > **Prerequisites:** Lakehouse Sync must be enabled in the Lakebase UI for the `app` schema, targeting this catalog/schema. The `lb_*_history` tables are auto-created by the sync process.
+
+-- COMMAND ----------
+
+-- DBTITLE 1,View DDL — v_load_test_runs (latest state per run)
+-- Latest state of each load test run (excludes deleted rows)
+CREATE OR REPLACE VIEW v_load_test_runs AS
+SELECT * EXCEPT (_change_type, _timestamp, _lsn, _xid, _rn)
+FROM (
+  SELECT *, ROW_NUMBER() OVER (
+    PARTITION BY run_id ORDER BY _lsn DESC, _timestamp DESC
+  ) AS _rn
+  FROM lb_load_test_runs_history
+  WHERE _change_type != 'update_preimage'
+)
+WHERE _rn = 1 AND _change_type != 'delete';
+
+-- COMMAND ----------
+
+-- DBTITLE 1,View DDL — v_load_test_type_results (latest state per type per run)
+-- Latest state of each per-type result (excludes deleted rows)
+CREATE OR REPLACE VIEW v_load_test_type_results AS
+SELECT * EXCEPT (_change_type, _timestamp, _lsn, _xid, _rn)
+FROM (
+  SELECT *, ROW_NUMBER() OVER (
+    PARTITION BY run_id, record_type ORDER BY _lsn DESC, _timestamp DESC
+  ) AS _rn
+  FROM lb_load_test_type_results_history
+  WHERE _change_type != 'update_preimage'
+)
+WHERE _rn = 1 AND _change_type != 'delete';

@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Play, Square, RefreshCw, Zap, Clock, BarChart3, Layers, ArrowUpCircle, ArrowDownCircle, Settings2, Sparkles } from 'lucide-react';
 import { BrandIcon } from '@/components/BrandIcon';
+import { LoadTestHistory } from './LoadTestHistory';
 import { type RecordType, RECORD_TYPES } from '@shared/synthetic-healthkit';
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -264,7 +265,7 @@ export function LoadTestPage() {
         body: JSON.stringify({
           counts,
           batchSize,
-          userId: 'synthetic-load-test',
+          presetLabel: PRESETS[activePreset]?.label ?? 'Custom',
           sourcePlatform: 'synthetic',
         }),
         signal: abortController.signal,
