@@ -1,90 +1,134 @@
-## Session: Load Test History — UX Refinements
+## Session: Load Test History — UX Refinements & Pool Size Bug Fix
 
 **Date:** 2026-04-23
 **Bundle:** `dbxW_zerobus_app`
 
 ### Summary
 
-Three UX improvements to the Load Test History component, deployed alongside the earlier Lakebase + Lakehouse Sync implementation session:
+Four rounds of changes to the Load Test History feature, following the earlier Lakebase + Lakehouse Sync implementation session:
 
 1. **History section moved above controls** — users see the run timeline first, before the preset/config/start-test panel
-2. **Cross-user real-time refresh** — history table updates for *all* viewers when any user starts or completes a test, via two mechanisms: immediate `refreshTrigger` prop bump (for the user who triggered the test) and a 10-second polling interval (for all other viewers)
-3. **Auto-expand most recent run** — after every fetch, the most recent `running` or `complete` run is automatically expanded to show per-type breakdown
+2. **Cross-user real-time refresh** — history table updates for *all* viewers when any user starts or completes a test, via `refreshTrigger` prop bump (instant for the triggering user) and 10-second polling (for other viewers)
+3. **Polish: spacing, flash suppression, fixed-height scroll** — added bottom margin between history and controls, eliminated loading flash on background refresh, limited table to \~5 visible rows with sticky header
+4. **Auto-expand removed** — defaulting to all rows collapsed per user feedback
+5. **Pool size bug fix + backfill** — `pool_size_start` and `pool_size_end` were always NULL due to a property name mismatch; fixed for future runs and backfilled 5 historical runs with values reconstructed from OTel logs
 
-### Problem
+---
 
-The initial LoadTestHistory component was fully self-contained: it fetched on mount, managed its own expand state, and sat at the bottom of the page. Three issues:
+### Round 1: Layout, Refresh, Auto-Expand
 
-- **Visibility:** History was below the fold, after the 3-column controls/results grid — users had to scroll to see past runs
-- **Stale data across users:** If User A ran a test, User B's history table wouldn't update until they manually clicked Refresh
-- **Manual expand:** Users had to click a row to see the per-type breakdown every time the page loaded
+#### Problem
 
-### Design Decisions
+The initial LoadTestHistory component was self-contained: fetched on mount, managed its own expand state, and sat at the bottom of the page.
+
+- **Visibility:** History was below the fold, after the 3-column controls/results grid
+- **Stale data across users:** User B's table wouldn't update until they clicked Refresh
+- **Manual expand:** Users had to click a row to see breakdown every time
+
+#### Changes
+
+**`LoadTestHistory.tsx`** — Added `refreshTrigger?: number` prop with `useEffect` to re-fetch on change; added 10-second `setInterval` polling; added auto-expand of most recent `running`/`complete` run after each fetch.
+
+**`LoadTestPage.tsx`** — Added `historyRefresh` state + `bumpHistory` callback; moved `<LoadTestHistory refreshTrigger={historyRefresh} />` above the 3-column grid; added `bumpHistory()` at three lifecycle points: test start (phase→running), SSE `complete` event, and `finally` block.
+
+#### Design Decisions
 
 | Decision | Rationale |
 | --- | --- |
-| **Polling (10s interval) for cross-user updates** | Simpler than adding a WebSocket/SSE broadcast channel. 10s is frequent enough for a testing tool without creating excessive API load. The Lakebase query is lightweight (single-table scan with LATERAL JOIN, LIMIT 50). |
-| **`refreshTrigger` counter prop for immediate refresh** | Polling alone would delay the current user's view by up to 10s. The counter prop (`bumpHistory()`) forces an instant re-fetch at three lifecycle points: test start, SSE `complete` event, and the `finally` block (covers abort/network errors). |
-| **Auto-expand via `fetched.find()` with `running \|\| complete`** | The API returns runs sorted by `started_at DESC`, so `find()` naturally picks the most recent matching run. Checking `running` first means an in-progress test takes priority over a past completed one. |
-| **`bumpHistory` in `finally` block (not just `complete`)** | Handles edge cases: user abort (phase → idle), network timeout (phase → complete with partial-success message), and errors. Every test lifecycle exit triggers a history refresh. |
+| **Polling (10s interval)** | Simpler than WebSocket/SSE broadcast. 10s is frequent enough for a testing tool. Lakebase query is lightweight (LATERAL JOIN, LIMIT 50). |
+| **`refreshTrigger` counter prop** | Polling alone delays current user's view by up to 10s. Counter prop forces instant re-fetch at three lifecycle points. |
+| **`bumpHistory` in `finally` block** | Covers abort (phase→idle), network timeout (phase→complete with partial-success), and errors. Every lifecycle exit triggers refresh. |
 
-### Changes
-
-#### `LoadTestHistory.tsx` (3 changes)
-
-1. **Added `LoadTestHistoryProps` interface** with optional `refreshTrigger?: number` prop
-2. **Added `useEffect` for polling** — `setInterval(fetchHistory, 10_000)` with cleanup on unmount
-3. **Added auto-expand logic** inside `fetchHistory` — after setting runs, finds the first `running` or `complete` run and calls `setExpandedRun(mostRecent.run_id)`
-
-#### `LoadTestPage.tsx` (4 changes)
-
-1. **Added `historyRefresh` state + `bumpHistory` callback** — `useState(0)` counter with stable `useCallback` incrementer
-2. **Moved `<LoadTestHistory />` above the 3-column grid** — now renders between the page header and the controls, with `refreshTrigger={historyRefresh}` prop
-3. **Added `bumpHistory()` at test start** — after `setState({ phase: 'running' })`, before the `fetch()` call
-4. **Added `bumpHistory()` at test complete and finally** — in the SSE `complete` handler (alongside `fetchPoolStatus()`) and in the `finally` block (covers all exit paths)
-
-### Refresh Timeline (for current user)
+#### Refresh Timeline
 
 ```
-User clicks "Start Test"
-  → setState({ phase: 'running' })
-  → bumpHistory()                    ← immediate: history shows new 'running' row
-  → fetch() POST /load-test/stream
-  → ... SSE progress events ...
-  → eventType === 'complete'
-    → setState({ phase: 'complete' })
-    → fetchPoolStatus()
-    → bumpHistory()                  ← immediate: history shows 'complete' row
-  → finally block
-    → bumpHistory()                  ← safety net: covers abort, network errors
+Current user:                         Other viewers:
+Start Test                            Page loads → fetchHistory()
+  → setState({ phase: 'running' })    → setInterval(fetchHistory, 10s)
+  → bumpHistory() ← instant           → Every 10s: silent re-fetch
+  → SSE progress events...
+  → complete event
+    → bumpHistory() ← instant
+  → finally
+    → bumpHistory() ← safety net
 ```
 
-### Refresh Timeline (for other viewers)
+---
 
-```
-Page loads → fetchHistory() on mount
-  → setInterval(fetchHistory, 10_000) starts
-  → Every 10s: re-fetch from GET /api/v1/testing/history
-  → After each fetch: auto-expand most recent running/complete run
-```
+### Round 2: Polish — Spacing, Flash, Scroll
+
+#### Problem (from screenshot review)
+
+- History table was too close to the "Start Load Test" button below
+- Every 10-second poll caused a visible flash (loading spinner replaced the table briefly)
+- With many runs, the history table grew unbounded, pushing controls off-screen
+
+#### Changes
+
+**`LoadTestHistory.tsx`** (4 changes):
+
+1. **Spacing** — Added `mb-8` to wrapper div for clear gap between history and controls
+2. **Flash suppression** — Added `isFirstLoad = useRef(true)`. Loading spinner (`setLoading(true)`) only fires on the first fetch. Background polls and `refreshTrigger` bumps silently swap data via `setRuns()` without toggling loading state. Table visibility condition changed from `!loading && runs.length > 0` to `runs.length > 0`.
+3. **Fixed-height scroll** — Wrapped `<table>` in `<div className="max-h-[360px] overflow-y-auto">` (\~5 collapsed rows visible). Added `sticky top-0 z-10` on `<thead>` with solid `bg-[var(--card)]` background so the header stays pinned while scrolling.
+
+---
+
+### Round 3: Remove Auto-Expand
+
+Per user feedback, removed the auto-expand logic entirely. All rows now start collapsed — users click to expand manually. Removed the `fetched.find()` + `setExpandedRun()` block from `fetchHistory`.
+
+---
+
+### Round 4: Pool Size Bug Fix + OTel-Based Backfill
+
+#### Bug: `pool_size_start` and `pool_size_end` always NULL
+
+**Root cause:** `zeroBusService.poolStatus()` returns `{ pool_size, active_streams, ... }` but `load-test-routes.ts` accessed `.active` — a property that doesn't exist. `undefined` → `null` in Postgres.
+
+Three call sites were affected:
+- Line 190: `poolBefore.active` → `poolBefore.pool_size` (test start)
+- Line 235: `zeroBusService.poolStatus().active` → `.pool_size` (client disconnect/abort)
+- Line 279: `poolAfter.active` → `poolAfter.pool_size` (test complete)
+
+#### Backfill: values reconstructed from OTel logs
+
+Queried [hls_fde_dev.dev_matthew_giglia_wearables.dbxw_0bus_ingest_otel_logs] for `[ZeroBus] Pool resized:` and `[LoadTest/SSE] Starting:` entries. Correlated pool resize timestamps against each run's start/complete timestamps to determine exact pool sizes:
+
+| Run ID | Preset | Pool Start | Pool End | Evidence |
+| --- | --- | --- | --- | --- |
+| `1733e1fa` | Small | 2 | 4 | Pool init at 2; scale UP 2→4 during test |
+| `b0fecbea` | Smoke | 2 | 2 | Pool at 2; test too fast (799ms) for auto-scale |
+| `d68ac575` | Medium | 4 | 4 | Pool at 4 after prior scale-up; no scaling during 3.4s test |
+| `5c355be0` | Large | 3 | 5 | Pool at 3 (down from 4); scale UP 3→5 during test |
+| `ff583220` | Massive | 4 | 14 | Pool at 4 (down from 5); scaled UP 4→6→8→10→12→14 during 98s test |
+
+**Migration implementation:** Added `BACKFILL_POOL_DATA` constant with the 5 run IDs and exact `{ start, end }` values. `backfillPoolSize()` method runs on startup (in `ensureTables()` when tables already exist), checks which of the 5 runs still have `pool_size_start IS NULL`, and patches them. Sets **both** `pool_size_start` and `pool_size_end`. Idempotent — skips runs already patched.
+
+Note: the initial generic backfill (`pool_size_start = auto_scale_min`) was only correct for 2 of 5 runs. The Medium run started at pool size 4 (not min=2), the Large at 3, and the Massive at 4.
+
+---
 
 ### Files Modified
 
-| File | Lines Changed | Change Type |
-| --- | --- | --- |
-| `client/src/pages/testing/LoadTestHistory.tsx` | +20 | Props interface, refreshTrigger useEffect, polling useEffect, auto-expand logic |
-| `client/src/pages/testing/LoadTestPage.tsx` | +8 | historyRefresh state, bumpHistory callback, JSX reorder, 3× bumpHistory() calls |
+| File | Change Type |
+| --- | --- |
+| `client/src/pages/testing/LoadTestHistory.tsx` | Props interface, refreshTrigger/polling useEffects, isFirstLoad flash suppression, fixed-height scroll container, sticky header, auto-expand removed, mb-8 spacing |
+| `client/src/pages/testing/LoadTestPage.tsx` | historyRefresh state, bumpHistory callback, JSX reorder (history above grid), 3× bumpHistory() calls |
+| `server/routes/testing/load-test-routes.ts` | `.active` → `.pool_size` at 3 call sites |
+| `server/services/load-test-history-service.ts` | BACKFILL_POOL_DATA constant, BACKFILL_POOL_SIZE_CHECK_SQL, backfillPoolSize() method, wired into ensureTables() |
 
 ### Not Changed
 
-- **Server routes** — no backend changes needed; the existing `GET /api/v1/testing/history` endpoint already returns all runs for all users
-- **Lakebase schema** — no schema changes
+- **Lakebase schema** — no DDL changes
 - **Infra bundle** — no changes
+- **Server API endpoints** — no new endpoints; existing GET /history serves all users
 
 ### Testing Considerations
 
-- Open the Load Test page in two browser tabs (same or different users)
-- Start a test in Tab A → Tab B should show the `running` row within \~10s (polling)
-- When the test completes in Tab A → Tab A sees instant update; Tab B sees `complete` within \~10s
-- The most recently completed (or running) row should be auto-expanded on every refresh
-- History section should be visible above the preset/config controls without scrolling
+- Open Load Test page in two browser tabs (same or different users)
+- Start test in Tab A → Tab B shows `running` row within \~10s (polling); Tab A sees instant update
+- No loading flash during 10s polling cycles — data swaps silently
+- History table shows \~5 rows with scroll; header stays pinned
+- All rows start collapsed; click to expand
+- Clear spacing gap between history section and Scale Presets / Start Load Test
+- After deploy: verify `pool_size_start` and `pool_size_end` populate on new runs AND are backfilled on the 5 historical runs (check `[LoadTestHistory] Backfilled pool sizes on 5 run(s)` log line)
