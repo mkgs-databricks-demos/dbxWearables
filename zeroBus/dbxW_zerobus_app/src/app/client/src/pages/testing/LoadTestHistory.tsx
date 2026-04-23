@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { Fragment, useState, useEffect, useCallback, useRef } from 'react';
 import {
   History, ChevronDown, ChevronUp,
   User, ArrowUpDown, RefreshCw,
@@ -323,7 +323,7 @@ export function LoadTestHistory({ refreshTrigger = 0 }: LoadTestHistoryProps) {
                 const isExpanded = expandedRun === run.run_id;
 
                 return (
-                  <React.Fragment key={run.run_id}>
+                  <Fragment key={run.run_id}>
                     <tr
                       className="border-b border-[var(--border)] hover:bg-[var(--muted)]/20 cursor-pointer transition-colors"
                       onClick={() => setExpandedRun(isExpanded ? null : run.run_id)}
@@ -420,7 +420,7 @@ export function LoadTestHistory({ refreshTrigger = 0 }: LoadTestHistoryProps) {
                         </td>
                       </tr>
                     )}
-                  </React.Fragment>
+                  </Fragment>
                 );
               })}
             </tbody>
