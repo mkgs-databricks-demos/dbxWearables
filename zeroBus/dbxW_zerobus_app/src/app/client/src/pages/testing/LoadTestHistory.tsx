@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  History, Clock, Zap, Layers, ChevronDown, ChevronUp,
-  User, Gauge, ArrowUpDown, RefreshCw,
+  History, ChevronDown, ChevronUp,
+  User, ArrowUpDown, RefreshCw,
 } from 'lucide-react';
 
 /* ═════════════════════════════════════════════════════════════════

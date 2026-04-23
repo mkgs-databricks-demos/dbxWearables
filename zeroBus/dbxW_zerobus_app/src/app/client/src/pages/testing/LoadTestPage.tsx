@@ -848,6 +848,9 @@ export function LoadTestPage() {
           )}
         </div>
       </div>
+
+      {/* ── History Section ────────────────────────────────────────── */}
+      <LoadTestHistory />
     </div>
   );
 }
