@@ -24,6 +24,7 @@ This infrastructure bundle sits at the base of that stack. It creates the shared
 | SQL Warehouse | 2X-Small serverless PRO (preview channel) | Compute for DDL jobs and ad-hoc queries |
 | Lakebase Autoscaling | `dbxw-zerobus-wearables` (Postgres 17) | OLTP database for app state, sync metadata, operational data |
 | Service Principal | `dbxw-zerobus-{schema}` (created dynamically) | Least-privilege SPN for ZeroBus ingestion |
+| Service Principal | `dbxw-ios-bootstrap-{schema}` (created dynamically) | Minimal-privilege SPN for iOS auth bootstrap |
 | Bronze Table | `wearables_zerobus` (liquid clustering) | Target table for ZeroBus streaming writes |
 | Grants | Catalog, schema, and table grants | Access control for the ZeroBus SPN and user groups |
 
@@ -35,7 +36,7 @@ The **dbxW ZeroBus — UC Setup** job (`resources/uc_setup.job.yml`) is a two-ta
 
 | Task | Notebook | What it does |
 | --- | --- | --- |
-| `ensure_service_principal` | `src/uc_setup/ensure-service-principal` (Python) | Creates or finds SPN `dbxw-zerobus-{schema}`, stores client ID (under schema-qualified key name) + derived values in secret scope, provisions stream pool size, grants scope READ, checks for client secret |
+| `ensure_service_principal` | `src/uc_setup/ensure-service-principal` (Python) | Creates or finds two SPNs: `dbxw-zerobus-{schema}` (ZeroBus ingestion) and `dbxw-ios-bootstrap-{schema}` (iOS auth). Stores client ID, workspace URL, ZeroBus endpoint, target table, stream pool size, JWT signing secret (auto-generated on first run), Apple bundle ID, and iOS SPN application ID. Grants scope READ to ZeroBus SPN. Checks for admin-provisioned client secret. |
 | `create_wearables_table` | `src/uc_setup/target-table-ddl` (SQL) | Creates the bronze table with liquid clustering, grants USE CATALOG / USE SCHEMA / MODIFY / SELECT to the SPN |
 
 The SPN's `application_id` is passed from task 1 to task 2 via a Databricks **task value**. The job is idempotent — safe to re-run at any time.
@@ -44,21 +45,32 @@ The SPN's `application_id` is passed from task 1 to task 2 via a Databricks **ta
 
 The `dbxw_zerobus_credentials` scope contains two categories of secrets. The client ID and client secret key names are **schema-qualified** in dev and hls_fde targets (e.g. `client_id_wearables`) so that multiple schemas can share a single scope without key collisions.
 
-**Auto-provisioned** (by the UC setup job — refreshed on every run):
+**Auto-provisioned** (by the UC setup job — refreshed on every run unless noted):
 
 | Key | Name Variable | Source | Description |
 | --- | --- | --- | --- |
-| Client ID | `client_id_dbs_key` | SPN `application_id` | OAuth M2M client identifier |
+| Client ID | `client_id_dbs_key` | ZeroBus SPN `application_id` | OAuth M2M client identifier |
 | Workspace URL | `workspace_url` (fixed) | Derived from config | Databricks workspace URL |
 | ZeroBus endpoint | `zerobus_endpoint` (fixed) | Derived from workspace ID + region | ZeroBus Ingest server endpoint |
 | Target table name | `target_table_name` (fixed) | From job params | Fully qualified bronze table name |
 | Stream pool size | `zerobus_stream_pool_size` (fixed) | From job params | Number of concurrent gRPC streams in the SDK stream pool |
+| JWT signing secret | `jwt_signing_secret_key` | Auto-generated (first run only) | HS256 key for app-issued JWTs — preserved on re-runs |
+| Apple bundle ID | `apple_bundle_id_key` | From job params | iOS app bundle identifier for Apple token `aud` validation |
+| iOS SPN app ID | `ios_spn_application_id_key` | iOS Bootstrap SPN `application_id` | Route guard identity verification |
 
 **Admin-provisioned** (manual step required after first deploy):
 
 | Key | Name Variable | Source | Description |
 | --- | --- | --- | --- |
-| Client secret | `client_secret_dbs_key` | Admin-generated | OAuth M2M client secret |
+| Client secret | `client_secret_dbs_key` | Admin-generated | ZeroBus SPN OAuth M2M client secret |
+
+**Admin steps NOT stored in the secret scope:**
+
+| Step | SPN | Action | Purpose |
+| --- | --- | --- | --- |
+| Generate OAuth secret | `dbxw-ios-bootstrap-{schema}` | Workspace UI or CLI | iOS app needs `client_id` + `client_secret` for AppKit proxy auth |
+| Grant CAN_USE on app | `dbxw-ios-bootstrap-{schema}` | Apps UI or API | iOS SPN must reach the Databricks App endpoint |
+| Embed in iOS binary | `dbxw-ios-bootstrap-{schema}` | Xcode project | OAuth credentials compiled into the app |
 
 #### Schema-qualified key names per target
 
@@ -70,7 +82,11 @@ The `dbxw_zerobus_credentials` scope contains two categories of secrets. The cli
 
 The actual key names are passed to the UC setup job as parameters (`client_id_dbs_key`, `client_secret_dbs_key`) and resolved from the bundle variables at deploy time. The companion `dbxW_zerobus_app` bundle declares matching variables with identical per-target values.
 
-> **Admin action required:** After the first run of the UC setup job, an admin must generate an OAuth secret for the `dbxw-zerobus-{schema}` service principal and store it under the schema-qualified key name (shown in the table above) in the scope. The client ID is stored automatically. This can be done via:
+> **Admin actions required after first run:**
+> 1. **ZeroBus SPN** (`dbxw-zerobus-{schema}`): Generate an OAuth secret and store it under the schema-qualified key name (shown in the table above) in the scope. The client ID is stored automatically.
+> 2. **iOS Bootstrap SPN** (`dbxw-ios-bootstrap-{schema}`): Generate an OAuth secret and embed the `client_id` + `client_secret` in the iOS app binary. Then grant `CAN_USE` on the Databricks App (after app bundle deploy).
+>
+> Provisioning methods:
 > * **Workspace UI:** Settings → Identity and access → Service principals → Secrets → Generate secret
 > * **Databricks CLI:** `databricks account service-principal-secrets create <sp_id>`
 > * **External keystore:** Sync from Azure Key Vault, AWS Secrets Manager, or HashiCorp Vault
@@ -168,6 +184,9 @@ Infrastructure resources must be deployed **first**, before any dependent bundle
    │  ✓ Secret scope: workspace_url            (auto-provisioned)
    │  ✓ Secret scope: zerobus_endpoint         (auto-provisioned)
    │  ✓ Secret scope: target_table_name        (auto-provisioned)
+   │  ✓ Secret scope: jwt_signing_secret       (auto-provisioned, first run only)
+   │  ✓ Secret scope: apple_bundle_id          (auto-provisioned)
+   │  ✓ Secret scope: ios_spn_application_id   (auto-provisioned)
    │  ✓ Secret scope: {client_secret_dbs_key}   (admin-provisioned)
    │  ✓ Table: catalog.schema.wearables_zerobus
    │  ✓ Secret scope: zerobus_stream_pool_size (auto-provisioned)
@@ -182,7 +201,7 @@ Key names in `{braces}` are resolved from bundle variables at runtime. In dev/hl
 
 | Check | Missing → behaviour |
 | --- | --- |
-| Auto-provisioned keys (`{client_id_dbs_key}`, `workspace_url`, `zerobus_endpoint`, `target_table_name`) | **Fail** — instructs you to run the UC setup job |
+| Auto-provisioned keys (`{client_id_dbs_key}`, `workspace_url`, `zerobus_endpoint`, `target_table_name`, `jwt_signing_secret`, `apple_bundle_id`, `ios_spn_application_id`) | **Fail** — instructs you to run the UC setup job |
 | Bronze table (`wearables_zerobus`) | **Fail** — instructs you to run the UC setup job |
 | Admin-provisioned key (`{client_secret_dbs_key}`) | **Fail** — prints admin provisioning instructions; use `--skip-checks` to override |
 | Lakebase Data API status | **Info** — notes status if detectable; does not block deploy (AppKit does not require it) |
@@ -253,16 +272,38 @@ databricks bundle run wearables_uc_setup --target dev
 ### Provision the client_secret (admin step)
 
 ```bash
-# 1. Generate an OAuth secret for the SPN (requires workspace or account admin)
+# 1. Generate an OAuth secret for the ZeroBus SPN (requires workspace or account admin)
 #    Via UI: Settings > Identity and access > Service principals > dbxw-zerobus-wearables > Secrets > Generate secret
 #    Via CLI: databricks account service-principal-secrets create <sp_workspace_id>
 
 # 2. Store the secret in the scope under the schema-qualified key name.
 #    For dev/hls_fde targets, the key is client_secret_wearables:
-databricks secrets put-secret --scope dbxw_zerobus_credentials --key client_secret_wearables --string-value "<secret>"
+databricks secrets put-secret dbxw_zerobus_credentials client_secret_wearables --string-value "<secret>"
 
 #    For the prod target (unqualified default):
-#    databricks secrets put-secret --scope dbxw_zerobus_credentials --key client_secret --string-value "<secret>"
+#    databricks secrets put-secret dbxw_zerobus_credentials client_secret --string-value "<secret>"
+```
+
+### Provision the iOS Bootstrap SPN (admin step)
+
+The iOS Bootstrap SPN (`dbxw-ios-bootstrap-{schema}`) is created automatically by the UC setup job, but two manual steps are required:
+
+```bash
+# 1. Generate an OAuth secret for the iOS SPN
+#    Via UI: Settings > Identity and access > Service principals
+#           > dbxw-ios-bootstrap-wearables > Secrets > Generate secret
+#    Via CLI: databricks account service-principal-secrets create <ios_sp_workspace_id>
+
+# 2. After the app bundle is deployed, grant CAN_USE on the Databricks App:
+#    Via Apps UI: Apps > dbxw-0bus-ingest-{target} > Permissions > Add > dbxw-ios-bootstrap-wearables > CAN_USE
+
+# 3. Embed the iOS SPN's client_id + client_secret in the iOS app binary (Xcode project)
+#    The client_id (application_id) is stored in the secret scope as ios_spn_application_id
+#    and can be read with:
+#    databricks secrets get-secret dbxw_zerobus_credentials ios_spn_application_id
+
+# NOTE: The JWT signing secret and Apple bundle ID are auto-provisioned by the
+# UC setup job — no manual action needed for those.
 ```
 
 ### Managing Resources

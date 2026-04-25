@@ -6,11 +6,16 @@
 #      client_id (under the key named by client_id_dbs_key), workspace_url,
 #      zerobus_endpoint, target_table_name, and zerobus_stream_pool_size,
 #      grants scope READ, and outputs the SPN's application_id as a task value.
+#      Also creates the iOS bootstrap SPN, generates the JWT signing secret,
+#      and stores the Apple bundle ID and iOS SPN application_id.
 #   2. create_wearables_table — DDL + GRANT statements using the SPN from task 1.
 #
 # The client_secret must be provisioned separately by an admin via the
 # workspace UI, Databricks CLI, or external keystore, under the key named
 # by client_secret_dbs_key (schema-qualified in dev/hls_fde targets).
+#
+# The iOS SPN's OAuth client_secret must also be admin-provisioned and
+# embedded in the iOS app binary (not stored in the secret scope).
 #
 # NOTE: catalog and schema references use ${resources.schemas.wearables_schema.*}
 #       per the bundle convention — never ${var.catalog} or ${var.schema} directly.
@@ -21,17 +26,21 @@ resources:
       name: dbxW ZeroBus — UC Setup
 
       description: >
-        Bootstraps the ZeroBus ingestion infrastructure. Task 1 ensures a
-        least-privilege service principal (dbxw-zerobus-{schema}) exists,
-        populates the secret scope with the SPN's client_id (under the
-        schema-qualified key name), workspace_url, zerobus_endpoint,
-        target_table_name, and zerobus_stream_pool_size, and grants the
-        SPN READ access to the scope.
-        Task 2 creates the wearables_zerobus bronze table (liquid clustering
-        via CLUSTER BY AUTO) and grants USE CATALOG / USE SCHEMA / MODIFY /
-        SELECT to the SPN. The client_secret must be provisioned by an admin
-        after the first run under the schema-qualified key name. Idempotent
-        — safe to re-run.
+        Bootstraps the ZeroBus ingestion infrastructure. Task 1 ensures
+        two service principals exist: the ZeroBus SPN
+        (dbxw-zerobus-{schema}) for data ingestion, and the iOS
+        bootstrap SPN (dbxw-ios-bootstrap-{schema}) for mobile auth.
+        Populates the secret scope with SPN client IDs, workspace URL,
+        ZeroBus endpoint, target table name, stream pool size, JWT
+        signing secret (auto-generated), Apple bundle ID, and iOS SPN
+        application ID. Grants scope READ access.
+        Task 2 creates the wearables_zerobus bronze table (liquid
+        clustering via CLUSTER BY AUTO) and grants USE CATALOG / USE
+        SCHEMA / MODIFY / SELECT to the ZeroBus SPN.
+        Admin steps required after first run: provision client_secret
+        for ZeroBus SPN (schema-qualified key) and generate OAuth
+        credentials for iOS SPN (embed in iOS binary). Idempotent —
+        safe to re-run.
 
       # Job-level parameters — available to all tasks via dbutils.widgets.get()
       parameters:
@@ -48,8 +57,18 @@ resources:
         - name: zerobus_stream_pool_size
           default: ${var.zerobus_stream_pool_size}
 
+        # ── JWT Authentication (Phase 1) ──────────────────────────────
+        - name: jwt_signing_secret_key
+          default: ${var.jwt_signing_secret_key}
+        - name: apple_bundle_id
+          default: ${var.apple_bundle_id}
+        - name: apple_bundle_id_key
+          default: ${var.apple_bundle_id_key}
+        - name: ios_spn_application_id_key
+          default: ${var.ios_spn_application_id_key}
+
       tasks:
-        # Task 1: Find or create the ZeroBus service principal
+        # Task 1: Find or create the ZeroBus + iOS bootstrap service principals
         - task_key: ensure_service_principal
           notebook_task:
             notebook_path: ../src/uc_setup/ensure-service-principal.ipynb

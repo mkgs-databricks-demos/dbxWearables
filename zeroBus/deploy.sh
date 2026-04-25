@@ -18,8 +18,9 @@
 #   ./deploy.sh --target dev --destroy                # destroy deployed resources
 #
 # Infrastructure Readiness Checks (gate before app bundle deploy):
-#   Secret scope keys — all 5 must be present:
-#     Auto-provisioned:  {client_id_dbs_key}, workspace_url, zerobus_endpoint, target_table_name
+#   Secret scope keys — all 8 must be present:
+#     Auto-provisioned:  {client_id_dbs_key}, workspace_url, zerobus_endpoint, target_table_name,
+#                        jwt_signing_secret, apple_bundle_id, ios_spn_application_id
 #     Admin-provisioned: {client_secret_dbs_key}
 #   Key names are schema-qualified in dev/hls_fde targets (e.g. client_id_wearables).
 #   Bronze table — wearables_zerobus must exist in the target catalog.schema
@@ -280,10 +281,12 @@ print(f'LAKEBASE_PROJECT_ID=\"{safe(project_id)}\"')
 
 # --------------------------------------------------------------------------- #
 # build_key_arrays — populate REQUIRED / AUTO / ADMIN key arrays from the
-#                    resolved client_id_dbs_key and client_secret_dbs_key
+#                    resolved client_id_dbs_key and client_secret_dbs_key.
+#                    Auth keys (jwt_signing_secret, apple_bundle_id,
+#                    ios_spn_application_id) use fixed names (not schema-qualified).
 # --------------------------------------------------------------------------- #
 build_key_arrays() {
-  AUTO_PROVISIONED_KEYS=("${CLIENT_ID_DBS_KEY}" workspace_url zerobus_endpoint target_table_name)
+  AUTO_PROVISIONED_KEYS=("${CLIENT_ID_DBS_KEY}" workspace_url zerobus_endpoint target_table_name jwt_signing_secret apple_bundle_id ios_spn_application_id)
   ADMIN_PROVISIONED_KEYS=("${CLIENT_SECRET_DBS_KEY}")
   REQUIRED_SCOPE_KEYS=("${AUTO_PROVISIONED_KEYS[@]}" "${ADMIN_PROVISIONED_KEYS[@]}")
 }
