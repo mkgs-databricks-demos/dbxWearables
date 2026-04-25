@@ -9,15 +9,24 @@ final class PayloadInspectorViewModel: ObservableObject {
     @Published var selectedRecordType = "samples"
     @Published var lastPayload: SyncRecord?
     @Published var parsedLines: [PayloadLine] = []
+    @Published var errorMessage: String?
 
-    private var appDelegate: AppDelegate {
-        UIApplication.shared.delegate as! AppDelegate
+    private var appDelegate: AppDelegate? {
+        UIApplication.shared.delegate as? AppDelegate
     }
 
     func loadPayload() async {
+        guard let appDelegate else {
+            errorMessage = "App delegate not available"
+            parsedLines = []
+            lastPayload = nil
+            return
+        }
+        
         let ledger = appDelegate.syncCoordinator.syncLedger
         lastPayload = await ledger.getLastPayload(for: selectedRecordType)
         parsedLines = parseNDJSON(lastPayload?.ndjsonPayload)
+        errorMessage = nil
     }
 
     func copyPayloadToClipboard() {

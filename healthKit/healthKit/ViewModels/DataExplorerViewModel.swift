@@ -5,14 +5,22 @@ import UIKit
 final class DataExplorerViewModel: ObservableObject {
 
     @Published var stats: SyncStats = .empty
+    @Published var errorMessage: String?
 
-    private var appDelegate: AppDelegate {
-        UIApplication.shared.delegate as! AppDelegate
+    private var appDelegate: AppDelegate? {
+        UIApplication.shared.delegate as? AppDelegate
     }
 
     func loadStats() async {
+        guard let appDelegate else {
+            errorMessage = "App delegate not available"
+            stats = .empty
+            return
+        }
+        
         let ledger = appDelegate.syncCoordinator.syncLedger
         stats = await ledger.getStats()
+        errorMessage = nil
     }
 
     /// Summary rows for the top-level list.
