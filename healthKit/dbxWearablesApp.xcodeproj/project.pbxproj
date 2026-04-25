@@ -650,7 +650,7 @@
 		2D40D6948FA297AC7E5B4449 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = healthKit/Entitlements/dbxWearablesApp.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
@@ -801,7 +801,7 @@
 		8F9918E07E584285A40477B0 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = healthKit/Entitlements/dbxWearablesApp.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
