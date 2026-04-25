@@ -60,6 +60,7 @@
 		D601FEFB2F9CBB790085B0A5 /* HealthKitTestDataGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D601FEFA2F9CBB790085B0A5 /* HealthKitTestDataGenerator.swift */; };
 		D601FEFD2F9D2A230085B0A5 /* IntegrationTestHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = D601FEFC2F9D2A230085B0A5 /* IntegrationTestHelper.swift */; };
 		D601FEFF2F9D2A740085B0A5 /* TestResultsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D601FEFE2F9D2A740085B0A5 /* TestResultsView.swift */; };
+		D601FF012F9D2BE10085B0A5 /* DatabricksLogo.swift in Sources */ = {isa = PBXBuildFile; fileRef = D601FF002F9D2BE10085B0A5 /* DatabricksLogo.swift */; };
 		D75BDC9E9438F2219BEE4F29 /* HealthKitQueryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A857A58F181C55BD46FD2DE5 /* HealthKitQueryService.swift */; };
 		DAFEE242A161036772BD847E /* PayloadInspectorViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B548542332EFC8C1AB88F977 /* PayloadInspectorViewModel.swift */; };
 		DE3B6EF6EE222D1333DAAC1A /* APIResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21BDA56D69A95F4AC2CC4B4B /* APIResponse.swift */; };
@@ -153,6 +154,7 @@
 		D601FEFA2F9CBB790085B0A5 /* HealthKitTestDataGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitTestDataGenerator.swift; sourceTree = "<group>"; };
 		D601FEFC2F9D2A230085B0A5 /* IntegrationTestHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationTestHelper.swift; sourceTree = "<group>"; };
 		D601FEFE2F9D2A740085B0A5 /* TestResultsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestResultsView.swift; sourceTree = "<group>"; };
+		D601FF002F9D2BE10085B0A5 /* DatabricksLogo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabricksLogo.swift; sourceTree = "<group>"; };
 		D81665B1BF0B72B2D44A7074 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		DBF2E89473E3121C279F1A1A /* DeletionRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeletionRecord.swift; sourceTree = "<group>"; };
 		E2E99C9CE80A4845CB68B8AF /* SyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncCoordinator.swift; sourceTree = "<group>"; };
@@ -288,6 +290,7 @@
 				D601FEFA2F9CBB790085B0A5 /* HealthKitTestDataGenerator.swift */,
 				D601FEFC2F9D2A230085B0A5 /* IntegrationTestHelper.swift */,
 				D601FEFE2F9D2A740085B0A5 /* TestResultsView.swift */,
+				D601FF002F9D2BE10085B0A5 /* DatabricksLogo.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -587,6 +590,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D601FF012F9D2BE10085B0A5 /* DatabricksLogo.swift in Sources */,
 				D601FEFB2F9CBB790085B0A5 /* HealthKitTestDataGenerator.swift in Sources */,
 				26F5671838074579F0E3DDF0 /* APIConfiguration.swift in Sources */,
 				DE3B6EF6EE222D1333DAAC1A /* APIResponse.swift in Sources */,

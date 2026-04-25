@@ -573,7 +573,7 @@ struct AboutView: View {
 
             DataFlowDiagramView()
                 .padding(12)
-                .background(DBXColors.dbxNavy)
+                .background(DBXGradients.heroHeader)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .frame(maxWidth: .infinity, alignment: .leading)

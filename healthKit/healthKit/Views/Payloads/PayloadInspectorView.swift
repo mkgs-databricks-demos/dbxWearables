@@ -196,7 +196,7 @@ struct PayloadInspectorView: View {
             }
             .padding()
         }
-        .background(DBXColors.dbxNavy)
+        .background(DBXGradients.heroHeader)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal)
         .padding(.bottom)
