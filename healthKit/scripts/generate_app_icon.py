@@ -26,6 +26,7 @@ def hex_rgb(value: str) -> tuple[int, int, int]:
 
 DBX_RED = hex_rgb("FF3621")
 DBX_ORANGE = hex_rgb("FF6A33")
+DBX_ORANGE_DEEP = hex_rgb("E25420")
 DBX_NAVY = hex_rgb("0D2228")
 WHITE = (255, 255, 255)
 
@@ -83,7 +84,7 @@ def pulse_polyline(cx: int, cy: int, span: int, height: int) -> list[tuple[int, 
 
 
 def render() -> Image.Image:
-    icon = diagonal_gradient(SIZE, DBX_RED, DBX_ORANGE).convert("RGBA")
+    icon = diagonal_gradient(SIZE, DBX_ORANGE, DBX_ORANGE_DEEP).convert("RGBA")
 
     # Soft vignette towards corners to add depth.
     vignette = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
