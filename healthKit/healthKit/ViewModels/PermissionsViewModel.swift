@@ -1,30 +1,32 @@
 import UIKit
 import Combine
+import OSLog
 
 /// Manages the HealthKit authorization flow state for PermissionsView.
 @MainActor
 final class PermissionsViewModel: ObservableObject {
 
-    private var appDelegate: AppDelegate? {
-        UIApplication.shared.delegate as? AppDelegate
-    }
-    
-    private var healthKitManager: HealthKitManager? {
-        appDelegate?.healthKitManager
-    }
+    private let healthKitManager: HealthKitManager
 
     @Published var isAuthorized = false
     @Published var errorMessage: String?
     
     private var cancellables = Set<AnyCancellable>()
     
-    init() {
+    init(healthKitManager: HealthKitManager) {
+        self.healthKitManager = healthKitManager
         observeHealthKitManager()
     }
     
+    /// Convenience initializer that gets dependencies from AppDelegate
+    convenience init() {
+        guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else {
+            fatalError("AppDelegate not available - ensure the app is properly initialized")
+        }
+        self.init(healthKitManager: appDelegate.healthKitManager)
+    }
+    
     private func observeHealthKitManager() {
-        guard let healthKitManager else { return }
-        
         // Observe the authorization state from HealthKitManager
         healthKitManager.$isAuthorized
             .receive(on: DispatchQueue.main)
@@ -32,15 +34,11 @@ final class PermissionsViewModel: ObservableObject {
     }
 
     func requestAuthorization() async {
-        guard let healthKitManager else {
-            errorMessage = "Health Kit manager not available"
-            return
-        }
-        
         do {
             try await healthKitManager.requestAuthorization()
             errorMessage = nil
         } catch {
+            Log.ui.error("PermissionsViewModel: Authorization failed - \(error.localizedDescription)")
             errorMessage = error.localizedDescription
         }
     }

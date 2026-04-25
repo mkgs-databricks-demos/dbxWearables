@@ -1,13 +1,13 @@
 import UIKit
 import Combine
+import OSLog
 
 /// Drives the main dashboard view with sync status, category counts, and recent activity.
 @MainActor
 final class DashboardViewModel: ObservableObject {
 
-    private var appDelegate: AppDelegate? {
-        UIApplication.shared.delegate as? AppDelegate
-    }
+    private let healthKitManager: HealthKitManager
+    private let syncCoordinator: SyncCoordinator
 
     @Published var lastSyncDate: Date?
     @Published var lastSyncRecordCount = 0
@@ -24,24 +24,35 @@ final class DashboardViewModel: ObservableObject {
     
     private var cancellables = Set<AnyCancellable>()
 
-    init() {
+    init(healthKitManager: HealthKitManager, syncCoordinator: SyncCoordinator) {
+        self.healthKitManager = healthKitManager
+        self.syncCoordinator = syncCoordinator
         observeSyncCoordinator()
         checkEndpointConfiguration()
     }
     
+    /// Convenience initializer that gets dependencies from AppDelegate
+    convenience init() {
+        guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else {
+            fatalError("AppDelegate not available - ensure the app is properly initialized")
+        }
+        self.init(
+            healthKitManager: appDelegate.healthKitManager,
+            syncCoordinator: appDelegate.syncCoordinator
+        )
+    }
+    
     private func observeSyncCoordinator() {
-        guard let coordinator = appDelegate?.syncCoordinator else { return }
-        
         // Observe sync state changes from the coordinator
-        coordinator.$isSyncing
+        syncCoordinator.$isSyncing
             .receive(on: DispatchQueue.main)
             .assign(to: &$isSyncing)
         
-        coordinator.$lastSyncDate
+        syncCoordinator.$lastSyncDate
             .receive(on: DispatchQueue.main)
             .assign(to: &$lastSyncDate)
         
-        coordinator.$lastSyncRecordCount
+        syncCoordinator.$lastSyncRecordCount
             .receive(on: DispatchQueue.main)
             .assign(to: &$lastSyncRecordCount)
     }
@@ -51,30 +62,21 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func requestAuthorization() async {
-        guard let appDelegate else {
-            print("Warning: AppDelegate not available")
-            return
+        do {
+            try await healthKitManager.requestAuthorization()
+        } catch {
+            Log.ui.error("DashboardViewModel: Authorization failed - \(error.localizedDescription)")
         }
-        try? await appDelegate.healthKitManager.requestAuthorization()
     }
 
     func syncNow() async {
-        guard let appDelegate else {
-            print("Warning: AppDelegate not available")
-            return
-        }
-        await appDelegate.syncCoordinator.sync(context: .foreground)
+        await syncCoordinator.sync(context: .foreground)
         await loadStats()
     }
 
     /// Load persisted stats from SyncLedger.
     func loadStats() async {
-        guard let appDelegate else {
-            print("Warning: AppDelegate not available")
-            return
-        }
-        
-        let ledger = appDelegate.syncCoordinator.syncLedger
+        let ledger = syncCoordinator.syncLedger
         let stats = await ledger.getStats()
         categoryCounts = stats.totalRecordsSent
         recentEvents = await ledger.getRecentEvents()

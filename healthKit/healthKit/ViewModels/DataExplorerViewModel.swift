@@ -1,26 +1,28 @@
 import UIKit
+import OSLog
 
 /// Drives the Data Explorer tab — per-category breakdowns and aggregation stats.
 @MainActor
 final class DataExplorerViewModel: ObservableObject {
 
-    @Published var stats: SyncStats = .empty
-    @Published var errorMessage: String?
+    private let syncLedger: SyncLedger
 
-    private var appDelegate: AppDelegate? {
-        UIApplication.shared.delegate as? AppDelegate
+    @Published var stats: SyncStats = .empty
+
+    init(syncLedger: SyncLedger) {
+        self.syncLedger = syncLedger
+    }
+    
+    /// Convenience initializer that gets dependencies from AppDelegate
+    convenience init() {
+        guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else {
+            fatalError("AppDelegate not available - ensure the app is properly initialized")
+        }
+        self.init(syncLedger: appDelegate.syncCoordinator.syncLedger)
     }
 
     func loadStats() async {
-        guard let appDelegate else {
-            errorMessage = "App delegate not available"
-            stats = .empty
-            return
-        }
-        
-        let ledger = appDelegate.syncCoordinator.syncLedger
-        stats = await ledger.getStats()
-        errorMessage = nil
+        stats = await syncLedger.getStats()
     }
 
     /// Summary rows for the top-level list.

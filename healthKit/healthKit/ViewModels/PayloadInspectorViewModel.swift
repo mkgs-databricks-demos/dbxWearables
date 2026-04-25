@@ -1,4 +1,5 @@
 import UIKit
+import OSLog
 
 /// Drives the Payload Inspector tab — shows the last-sent NDJSON payload per record type.
 @MainActor
@@ -6,27 +7,31 @@ final class PayloadInspectorViewModel: ObservableObject {
 
     static let recordTypes = ["samples", "workouts", "sleep", "activity_summaries", "deletes"]
 
+    private let syncLedger: SyncLedger
+
     @Published var selectedRecordType = "samples"
     @Published var lastPayload: SyncRecord?
     @Published var parsedLines: [PayloadLine] = []
-    @Published var errorMessage: String?
 
-    private var appDelegate: AppDelegate? {
-        UIApplication.shared.delegate as? AppDelegate
+    init(syncLedger: SyncLedger) {
+        self.syncLedger = syncLedger
+    }
+    
+    /// Convenience initializer that gets dependencies from AppDelegate
+    convenience init() {
+        guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else {
+            fatalError("AppDelegate not available - ensure the app is properly initialized")
+        }
+        self.init(syncLedger: appDelegate.syncCoordinator.syncLedger)
     }
 
     func loadPayload() async {
-        guard let appDelegate else {
-            errorMessage = "App delegate not available"
-            parsedLines = []
-            lastPayload = nil
-            return
-        }
+        Log.ui.info("PayloadInspectorViewModel: loadPayload() called for type: \(self.selectedRecordType)")
         
-        let ledger = appDelegate.syncCoordinator.syncLedger
-        lastPayload = await ledger.getLastPayload(for: selectedRecordType)
+        lastPayload = await syncLedger.getLastPayload(for: selectedRecordType)
         parsedLines = parseNDJSON(lastPayload?.ndjsonPayload)
-        errorMessage = nil
+        
+        Log.ui.info("PayloadInspectorViewModel: Loaded \(self.parsedLines.count) lines")
     }
 
     func copyPayloadToClipboard() {
