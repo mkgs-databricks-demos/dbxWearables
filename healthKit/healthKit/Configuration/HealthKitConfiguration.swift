@@ -50,6 +50,22 @@ enum HealthKitConfiguration {
         return types
     }
 
+    /// Sample types this app is allowed to write to (DEBUG test-data generation).
+    /// Excludes Apple-managed types (`appleExerciseTime`, `appleStandTime`, `appleStandHour`)
+    /// which throw if listed in `toShare:` and the activity-summary type which is read-only.
+    static var allWritableTypes: Set<HKSampleType> {
+        let appleManagedIDs: Set<String> = [
+            HKQuantityTypeIdentifier.appleExerciseTime.rawValue,
+            HKQuantityTypeIdentifier.appleStandTime.rawValue,
+            HKCategoryTypeIdentifier.appleStandHour.rawValue,
+        ]
+        var types = Set<HKSampleType>()
+        types.formUnion(quantityTypes.filter { !appleManagedIDs.contains($0.identifier) })
+        types.formUnion(categoryTypes.filter { !appleManagedIDs.contains($0.identifier) })
+        types.insert(HKSeriesType.workoutType())
+        return types
+    }
+
     /// Background delivery frequency for observer queries.
     static let backgroundDeliveryFrequency: HKUpdateFrequency = .hourly
 

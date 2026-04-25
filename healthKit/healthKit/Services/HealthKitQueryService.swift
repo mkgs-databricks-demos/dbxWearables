@@ -49,12 +49,16 @@ final class HealthKitQueryService {
         to endDate: Date
     ) async throws -> [HKActivitySummary] {
         let calendar = Calendar.current
-        let startComponents = calendar.dateComponents([.year, .month, .day], from: startDate)
-        let endComponents = calendar.dateComponents([.year, .month, .day], from: endDate)
+        var startDateComponents = calendar.dateComponents([.year, .month, .day], from: startDate)
+        var endDateComponents = calendar.dateComponents([.year, .month, .day], from: endDate)
+        
+        // HealthKit requires DateComponents to have a calendar set
+        startDateComponents.calendar = calendar
+        endDateComponents.calendar = calendar
 
         let predicate = HKQuery.predicate(
-            forActivitySummariesBetweenStart: startComponents,
-            end: endComponents
+            forActivitySummariesBetweenStart: startDateComponents,
+            end: endDateComponents
         )
 
         return try await withCheckedThrowingContinuation { continuation in

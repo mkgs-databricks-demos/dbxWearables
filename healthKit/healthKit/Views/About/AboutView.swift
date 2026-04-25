@@ -7,6 +7,9 @@ struct AboutView: View {
     @State private var showOnboarding = false
     #if DEBUG
     @State private var showSPNCredentials = false
+    @State private var isGeneratingTestData = false
+    @State private var showTestDataAlert = false
+    @State private var testDataMessage = ""
     #endif
 
     var body: some View {
@@ -23,6 +26,7 @@ struct AboutView: View {
                     permissionsSection
                     settingsSection
                     #if DEBUG
+                    testDataSection
                     spnCredentialsSection
                     #endif
                     replayOnboardingSection
@@ -49,12 +53,117 @@ struct AboutView: View {
             .sheet(isPresented: $showSPNCredentials) {
                 SPNCredentialsView()
             }
+            .alert("Test Data", isPresented: $showTestDataAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(testDataMessage)
+            }
             #endif
         }
     }
 
     #if DEBUG
+    // MARK: - Test Data Generation (Debug)
+
+    private var testDataSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("Test Data Generator")
+
+            Text("Generate sample HealthKit data for testing the sync pipeline. All generated data will appear in the Health app and can be synced to your endpoint.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 8) {
+                Button {
+                    generateTestData()
+                } label: {
+                    HStack {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                        Text("Generate 30 Days of Data")
+                        Spacer()
+                        if isGeneratingTestData {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .scaleEffect(0.8)
+                        }
+                    }
+                }
+                .buttonStyle(DBXSecondaryButtonStyle())
+                .disabled(isGeneratingTestData)
+
+                Button {
+                    generateTestWorkout()
+                } label: {
+                    HStack {
+                        Image(systemName: "figure.run")
+                        Text("Generate Test Workout")
+                        Spacer()
+                        if isGeneratingTestData {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .scaleEffect(0.8)
+                        }
+                    }
+                }
+                .buttonStyle(DBXSecondaryButtonStyle())
+                .disabled(isGeneratingTestData)
+            }
+
+            Text("Generates: Steps, heart rate, sleep, active energy, exercise time, stand hours, distance, resting HR, and more.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dbxCard()
+    }
+
+    private func generateTestData() {
+        isGeneratingTestData = true
+        Task {
+            do {
+                let generator = HealthKitTestDataGenerator(healthStore: healthKitManager.healthStore)
+                try await generator.generateSampleData()
+                
+                await MainActor.run {
+                    testDataMessage = "✅ Successfully generated 30 days of test data including steps, heart rate, sleep, and activity ring data. Tap 'Sync Now' on the Dashboard to upload it!"
+                    showTestDataAlert = true
+                    isGeneratingTestData = false
+                }
+            } catch {
+                await MainActor.run {
+                    testDataMessage = "❌ Failed to generate test data: \(error.localizedDescription)\n\nMake sure HealthKit write permissions are granted."
+                    showTestDataAlert = true
+                    isGeneratingTestData = false
+                }
+            }
+        }
+    }
+    
+    private func generateTestWorkout() {
+        isGeneratingTestData = true
+        Task {
+            do {
+                let generator = HealthKitTestDataGenerator(healthStore: healthKitManager.healthStore)
+                try await generator.generateSampleWorkout(type: .running, date: Date(), duration: 1800)
+                
+                await MainActor.run {
+                    testDataMessage = "✅ Generated a 30-minute running workout with 250 kcal and 5km distance. Check the Health app or sync now!"
+                    showTestDataAlert = true
+                    isGeneratingTestData = false
+                }
+            } catch {
+                await MainActor.run {
+                    testDataMessage = "❌ Failed to generate workout: \(error.localizedDescription)\n\nMake sure HealthKit write permissions are granted."
+                    showTestDataAlert = true
+                    isGeneratingTestData = false
+                }
+            }
+        }
+    }
+
     // MARK: - SPN Credentials (Debug)
+
 
     private var spnCredentialsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -228,12 +337,20 @@ struct AboutView: View {
                 .buttonStyle(DBXSecondaryButtonStyle())
             }
 
-            Text("This app only reads health data. It never writes to HealthKit.")
+            Text(permissionsFooter)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .dbxCard()
+    }
+
+    private var permissionsFooter: String {
+        #if DEBUG
+        return "This app only reads health data. It never writes to HealthKit. Debug builds request write permissions for test data generation."
+        #else
+        return "This app only reads health data. It never writes to HealthKit."
+        #endif
     }
 
     // MARK: - Settings

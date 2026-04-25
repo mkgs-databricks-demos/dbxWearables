@@ -57,6 +57,7 @@
 		CA578533A700D4677AB90BDD /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A8DB7F7F1C9A1A4604648E /* KeychainHelper.swift */; };
 		CF7378DFC6AE14E2826023D5 /* NDJSONLineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E9E05C3D2BBFD9326BD62AB /* NDJSONLineView.swift */; };
 		D182BF610BDDDA3C40E8725B /* HealthSampleMapperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F393872EFF0517F3F8E6CBD /* HealthSampleMapperTests.swift */; };
+		D601FEFB2F9CBB790085B0A5 /* HealthKitTestDataGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D601FEFA2F9CBB790085B0A5 /* HealthKitTestDataGenerator.swift */; };
 		D75BDC9E9438F2219BEE4F29 /* HealthKitQueryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A857A58F181C55BD46FD2DE5 /* HealthKitQueryService.swift */; };
 		DAFEE242A161036772BD847E /* PayloadInspectorViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B548542332EFC8C1AB88F977 /* PayloadInspectorViewModel.swift */; };
 		DE3B6EF6EE222D1333DAAC1A /* APIResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21BDA56D69A95F4AC2CC4B4B /* APIResponse.swift */; };
@@ -147,6 +148,7 @@
 		BED48220767B7DC6FE34C4CF /* ActivitySummaryMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivitySummaryMapper.swift; sourceTree = "<group>"; };
 		BF5B3CCCDE16F7593C0EF831 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		C8D6936BA3B368C036604571 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		D601FEFA2F9CBB790085B0A5 /* HealthKitTestDataGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitTestDataGenerator.swift; sourceTree = "<group>"; };
 		D81665B1BF0B72B2D44A7074 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		DBF2E89473E3121C279F1A1A /* DeletionRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeletionRecord.swift; sourceTree = "<group>"; };
 		E2E99C9CE80A4845CB68B8AF /* SyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncCoordinator.swift; sourceTree = "<group>"; };
@@ -279,6 +281,7 @@
 				E2E99C9CE80A4845CB68B8AF /* SyncCoordinator.swift */,
 				880FCBB261A8729153A8D0A3 /* SyncLedger.swift */,
 				2E2972975AAAC31DEB50484C /* WorkoutMapper.swift */,
+				D601FEFA2F9CBB790085B0A5 /* HealthKitTestDataGenerator.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -579,6 +582,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D601FEFB2F9CBB790085B0A5 /* HealthKitTestDataGenerator.swift in Sources */,
 				26F5671838074579F0E3DDF0 /* APIConfiguration.swift in Sources */,
 				DE3B6EF6EE222D1333DAAC1A /* APIResponse.swift in Sources */,
 				F4D0E4A168D3F4C7EF63ABB7 /* APIService.swift in Sources */,
