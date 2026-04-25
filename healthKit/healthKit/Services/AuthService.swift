@@ -52,7 +52,7 @@ actor AuthService: AuthProviding {
         session: URLSession = .shared,
         tokenEndpoint: URL? = nil,
         scope: String = APIConfiguration.oauthScope,
-        clock: @escaping @Sendable () -> Date = Date.init
+        clock: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.session = session
         self.tokenEndpoint = tokenEndpoint ?? APIConfiguration.workspaceTokenEndpoint
