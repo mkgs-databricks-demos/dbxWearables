@@ -3,6 +3,7 @@ import SwiftUI
 /// Tab 4: Explains the app's purpose, ZeroBus, data flow, HealthKit types, and settings.
 struct AboutView: View {
     @EnvironmentObject private var healthKitManager: HealthKitManager
+    @EnvironmentObject private var syncCoordinator: SyncCoordinator
     @State private var permissionsViewModel: PermissionsViewModel?
     @State private var showOnboarding = false
     #if DEBUG
@@ -10,6 +11,20 @@ struct AboutView: View {
     @State private var isGeneratingTestData = false
     @State private var showTestDataAlert = false
     @State private var testDataMessage = ""
+    @State private var showAdvancedOptions = false
+    
+    // Generator configuration
+    @State private var daysToGenerate = 30
+    @State private var fitnessLevel: GeneratorConfig.FitnessLevel = .moderate
+    @State private var includeWeekendVariation = true
+    @State private var includeWorkouts = true
+    @State private var includeSleepStages = true
+    @State private var includeAdvancedMetrics = true
+    
+    // Integration testing
+    @State private var isRunningTests = false
+    @State private var testResults: [TestResult] = []
+    @State private var showTestResults = false
     #endif
 
     var body: some View {
@@ -27,6 +42,7 @@ struct AboutView: View {
                     settingsSection
                     #if DEBUG
                     debugInfoSection
+                    integrationTestSection
                     testDataSection
                     spnCredentialsSection
                     #endif
@@ -58,6 +74,9 @@ struct AboutView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(testDataMessage)
+            }
+            .sheet(isPresented: $showTestResults) {
+                TestResultsView(results: testResults)
             }
             #endif
         }
@@ -124,54 +143,49 @@ struct AboutView: View {
         print(String(repeating: "=", count: 60) + "\n")
     }
 
-    // MARK: - Test Data Generation (Debug)
-
-
-    private var testDataSection: some View {
+    // MARK: - Integration Testing (Debug)
+    
+    private var integrationTestSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Test Data Generator")
-
-            Text("Generate sample HealthKit data for testing the sync pipeline. All generated data will appear in the Health app and can be synced to your endpoint.")
+            sectionHeader("Integration Testing")
+            
+            Text("Run end-to-end tests with different synthetic data scenarios to validate your entire pipeline.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-
+            
             VStack(spacing: 8) {
                 Button {
-                    generateTestData()
+                    runIntegrationTests()
                 } label: {
                     HStack {
-                        Image(systemName: "chart.line.uptrend.xyaxis")
-                        Text("Generate 30 Days of Data")
+                        Image(systemName: "testtube.2")
+                        Text("Run Test Suite")
                         Spacer()
-                        if isGeneratingTestData {
+                        if isRunningTests {
                             ProgressView()
                                 .progressViewStyle(.circular)
                                 .scaleEffect(0.8)
                         }
                     }
                 }
-                .buttonStyle(DBXSecondaryButtonStyle())
-                .disabled(isGeneratingTestData)
-
-                Button {
-                    generateTestWorkout()
-                } label: {
-                    HStack {
-                        Image(systemName: "figure.run")
-                        Text("Generate Test Workout")
-                        Spacer()
-                        if isGeneratingTestData {
-                            ProgressView()
-                                .progressViewStyle(.circular)
-                                .scaleEffect(0.8)
+                .buttonStyle(DBXPrimaryButtonStyle())
+                .disabled(isRunningTests)
+                
+                if !testResults.isEmpty {
+                    Button {
+                        showTestResults = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "chart.bar.doc.horizontal")
+                            Text("View Last Results (\(testResults.filter { $0.success }.count)/\(testResults.count) passed)")
+                            Spacer()
                         }
                     }
+                    .buttonStyle(DBXSecondaryButtonStyle())
                 }
-                .buttonStyle(DBXSecondaryButtonStyle())
-                .disabled(isGeneratingTestData)
             }
-
-            Text("Generates: Steps, heart rate, sleep, active energy, exercise time, stand hours, distance, resting HR, and more.")
+            
+            Text("Tests: Sedentary 7d, Minimal, Moderate 30d, Deletion workflow")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .padding(.top, 4)
@@ -180,15 +194,245 @@ struct AboutView: View {
         .dbxCard()
     }
 
+    // MARK: - Test Data Generation (Debug)
+
+
+    private var testDataSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("Test Data Generator")
+
+            Text("Generate realistic HealthKit data for testing. All samples are tagged as synthetic and can be safely deleted.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            // Quick Actions
+            VStack(spacing: 8) {
+                Button {
+                    generateTestData()
+                } label: {
+                    HStack {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                        Text("Generate \(daysToGenerate) Days")
+                        Spacer()
+                        if isGeneratingTestData {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .scaleEffect(0.8)
+                        }
+                    }
+                }
+                .buttonStyle(DBXPrimaryButtonStyle())
+                .disabled(isGeneratingTestData)
+
+                HStack(spacing: 8) {
+                    Button {
+                        generateTestWorkout()
+                    } label: {
+                        HStack {
+                            Image(systemName: "figure.run")
+                            Text("Single Workout")
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(DBXSecondaryButtonStyle())
+                    .disabled(isGeneratingTestData)
+                    
+                    Button(role: .destructive) {
+                        deleteSyntheticData()
+                    } label: {
+                        HStack {
+                            Image(systemName: "trash")
+                            Text("Delete Synthetic")
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(DBXSecondaryButtonStyle())
+                    .disabled(isGeneratingTestData)
+                }
+            }
+            
+            // Advanced Options Toggle
+            Button {
+                withAnimation {
+                    showAdvancedOptions.toggle()
+                }
+            } label: {
+                HStack {
+                    Image(systemName: showAdvancedOptions ? "chevron.down" : "chevron.right")
+                        .font(.caption)
+                    Text("Advanced Options")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    Spacer()
+                }
+            }
+            .foregroundStyle(.primary)
+            .padding(.top, 4)
+            
+            if showAdvancedOptions {
+                advancedOptionsView
+            }
+
+            Text("Generated: Steps, HR, HRV, SpO2, VO2Max, Sleep, Workouts, Energy, Distance")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dbxCard()
+    }
+    
+    private var advancedOptionsView: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Divider()
+            
+            // Days Slider
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Days to Generate")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    Spacer()
+                    Text("\(daysToGenerate)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                
+                Slider(value: Binding(
+                    get: { Double(daysToGenerate) },
+                    set: { daysToGenerate = Int($0) }
+                ), in: 7...90, step: 1)
+                .tint(DBXColors.dbxRed)
+                
+                HStack {
+                    Text("7 days")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("90 days")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            
+            // Fitness Level Picker
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Fitness Level")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                
+                Picker("Fitness Level", selection: $fitnessLevel) {
+                    Text("Sedentary").tag(GeneratorConfig.FitnessLevel.sedentary)
+                    Text("Light").tag(GeneratorConfig.FitnessLevel.light)
+                    Text("Moderate").tag(GeneratorConfig.FitnessLevel.moderate)
+                    Text("Active").tag(GeneratorConfig.FitnessLevel.active)
+                    Text("Very Active").tag(GeneratorConfig.FitnessLevel.veryActive)
+                }
+                .pickerStyle(.menu)
+                
+                Text(fitnessLevelDescription)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            
+            // Feature Toggles
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Features")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                
+                Toggle(isOn: $includeWeekendVariation) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Weekend Variation")
+                            .font(.subheadline)
+                        Text("30% less activity on weekends")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .tint(DBXColors.dbxRed)
+                
+                Toggle(isOn: $includeWorkouts) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Workouts")
+                            .font(.subheadline)
+                        Text("2-3 workouts per week (running, cycling, etc.)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .tint(DBXColors.dbxRed)
+                
+                Toggle(isOn: $includeSleepStages) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sleep Stages")
+                            .font(.subheadline)
+                        Text("Realistic light, deep, REM cycles")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .tint(DBXColors.dbxRed)
+                
+                Toggle(isOn: $includeAdvancedMetrics) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Advanced Metrics")
+                            .font(.subheadline)
+                        Text("HRV, SpO2, VO2Max, basal energy")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .tint(DBXColors.dbxRed)
+            }
+        }
+        .padding(.top, 8)
+    }
+    
+    private var fitnessLevelDescription: String {
+        switch fitnessLevel {
+        case .sedentary:
+            return "2k-5k steps/day, 200-400 kcal active, HR 65-80 resting"
+        case .light:
+            return "5k-8k steps/day, 400-600 kcal active, HR 60-75 resting"
+        case .moderate:
+            return "8k-12k steps/day, 600-900 kcal active, HR 55-70 resting"
+        case .active:
+            return "12k-16k steps/day, 900-1200 kcal active, HR 50-65 resting"
+        case .veryActive:
+            return "16k-22k steps/day, 1200-1800 kcal active, HR 45-60 resting"
+        }
+    }
+
     private func generateTestData() {
         isGeneratingTestData = true
         Task {
             do {
+                let config = GeneratorConfig(
+                    daysToGenerate: daysToGenerate,
+                    fitnessLevel: fitnessLevel,
+                    includeWeekendVariation: includeWeekendVariation,
+                    includeWorkouts: includeWorkouts,
+                    includeSleepStages: includeSleepStages,
+                    includeAdvancedMetrics: includeAdvancedMetrics
+                )
+                
                 let generator = HealthKitTestDataGenerator(healthStore: healthKitManager.healthStore)
-                try await generator.generateSampleData()
+                try await generator.generateSampleData(config: config)
                 
                 await MainActor.run {
-                    testDataMessage = "✅ Successfully generated 30 days of test data including steps, heart rate, sleep, and activity ring data. Tap 'Sync Now' on the Dashboard to upload it!"
+                    testDataMessage = """
+                    ✅ Successfully generated \(daysToGenerate) days of realistic health data!
+                    
+                    Fitness Level: \(fitnessLevel.displayName)
+                    Weekend Variation: \(includeWeekendVariation ? "Yes" : "No")
+                    Workouts: \(includeWorkouts ? "Yes" : "No")
+                    Sleep Stages: \(includeSleepStages ? "Yes" : "No")
+                    Advanced Metrics: \(includeAdvancedMetrics ? "Yes" : "No")
+                    
+                    All data is tagged as synthetic. Go to Dashboard and tap "Sync Now" to upload!
+                    """
                     showTestDataAlert = true
                     isGeneratingTestData = false
                 }
@@ -210,7 +454,7 @@ struct AboutView: View {
                 try await generator.generateSampleWorkout(type: .running, date: Date(), duration: 1800)
                 
                 await MainActor.run {
-                    testDataMessage = "✅ Generated a 30-minute running workout with 250 kcal and 5km distance. Check the Health app or sync now!"
+                    testDataMessage = "✅ Generated a 30-minute running workout with realistic metrics. Check the Health app or sync now!"
                     showTestDataAlert = true
                     isGeneratingTestData = false
                 }
@@ -219,6 +463,56 @@ struct AboutView: View {
                     testDataMessage = "❌ Failed to generate workout: \(error.localizedDescription)\n\nMake sure HealthKit write permissions are granted."
                     showTestDataAlert = true
                     isGeneratingTestData = false
+                }
+            }
+        }
+    }
+    
+    private func deleteSyntheticData() {
+        isGeneratingTestData = true
+        Task {
+            do {
+                let generator = HealthKitTestDataGenerator(healthStore: healthKitManager.healthStore)
+                try await generator.deleteSyntheticData()
+                
+                await MainActor.run {
+                    testDataMessage = "✅ Successfully deleted all synthetic data!\n\nOnly test data generated by this app was removed. Your real health data is safe."
+                    showTestDataAlert = true
+                    isGeneratingTestData = false
+                }
+            } catch {
+                await MainActor.run {
+                    testDataMessage = "❌ Failed to delete synthetic data: \(error.localizedDescription)"
+                    showTestDataAlert = true
+                    isGeneratingTestData = false
+                }
+            }
+        }
+    }
+    
+    private func runIntegrationTests() {
+        isRunningTests = true
+        testResults = []
+        
+        Task {
+            do {
+                let testHelper = IntegrationTestHelper(
+                    healthStore: healthKitManager.healthStore,
+                    syncCoordinator: syncCoordinator
+                )
+                
+                let results = try await testHelper.runFullTestSuite()
+                
+                await MainActor.run {
+                    testResults = results
+                    isRunningTests = false
+                    showTestResults = true
+                }
+            } catch {
+                await MainActor.run {
+                    testDataMessage = "❌ Test suite failed: \(error.localizedDescription)"
+                    showTestDataAlert = true
+                    isRunningTests = false
                 }
             }
         }
