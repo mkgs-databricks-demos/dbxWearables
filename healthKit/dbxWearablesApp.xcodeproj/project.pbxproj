@@ -61,6 +61,8 @@
 		D601FEFD2F9D2A230085B0A5 /* IntegrationTestHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = D601FEFC2F9D2A230085B0A5 /* IntegrationTestHelper.swift */; };
 		D601FEFF2F9D2A740085B0A5 /* TestResultsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D601FEFE2F9D2A740085B0A5 /* TestResultsView.swift */; };
 		D601FF012F9D2BE10085B0A5 /* DatabricksLogo.swift in Sources */ = {isa = PBXBuildFile; fileRef = D601FF002F9D2BE10085B0A5 /* DatabricksLogo.swift */; };
+		D601FF032F9D33390085B0A5 /* SyncStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = D601FF022F9D33390085B0A5 /* SyncStatus.swift */; };
+		D601FF052F9D34A40085B0A5 /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D601FF042F9D34A40085B0A5 /* NetworkMonitor.swift */; };
 		D75BDC9E9438F2219BEE4F29 /* HealthKitQueryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A857A58F181C55BD46FD2DE5 /* HealthKitQueryService.swift */; };
 		DAFEE242A161036772BD847E /* PayloadInspectorViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B548542332EFC8C1AB88F977 /* PayloadInspectorViewModel.swift */; };
 		DE3B6EF6EE222D1333DAAC1A /* APIResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21BDA56D69A95F4AC2CC4B4B /* APIResponse.swift */; };
@@ -155,6 +157,8 @@
 		D601FEFC2F9D2A230085B0A5 /* IntegrationTestHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationTestHelper.swift; sourceTree = "<group>"; };
 		D601FEFE2F9D2A740085B0A5 /* TestResultsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestResultsView.swift; sourceTree = "<group>"; };
 		D601FF002F9D2BE10085B0A5 /* DatabricksLogo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabricksLogo.swift; sourceTree = "<group>"; };
+		D601FF022F9D33390085B0A5 /* SyncStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStatus.swift; sourceTree = "<group>"; };
+		D601FF042F9D34A40085B0A5 /* NetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
 		D81665B1BF0B72B2D44A7074 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		DBF2E89473E3121C279F1A1A /* DeletionRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeletionRecord.swift; sourceTree = "<group>"; };
 		E2E99C9CE80A4845CB68B8AF /* SyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncCoordinator.swift; sourceTree = "<group>"; };
@@ -200,6 +204,8 @@
 			isa = PBXGroup;
 			children = (
 				30C3C52490A9B091CE2BA16B /* Assets.xcassets */,
+				D601FF022F9D33390085B0A5 /* SyncStatus.swift */,
+				D601FF042F9D34A40085B0A5 /* NetworkMonitor.swift */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -604,6 +610,7 @@
 				EC099C9843810E4C44128575 /* CategoryStatCard.swift in Sources */,
 				E68CF07141C8F8D0329EC559 /* DBXButtonStyles.swift in Sources */,
 				3C733CCF88EF53DBD26C7BEE /* DBXHeaderView.swift in Sources */,
+				D601FF032F9D33390085B0A5 /* SyncStatus.swift in Sources */,
 				361BCF9ABBC55FD000AAFA6B /* DBXTheme.swift in Sources */,
 				BE876EEBB3884B02D9FBF541 /* DashboardView.swift in Sources */,
 				6FADA9CFB75CB68ABD14844C /* DashboardViewModel.swift in Sources */,
@@ -611,6 +618,7 @@
 				0922AD0FAC10816B5ED9D105 /* DataExplorerViewModel.swift in Sources */,
 				FBE13AAA5A0730612AA55D8F /* DataFlowDiagramView.swift in Sources */,
 				96C1D8BF2AECE288A7E856AE /* DateFormatters.swift in Sources */,
+				D601FF052F9D34A40085B0A5 /* NetworkMonitor.swift in Sources */,
 				6C85F2FAD89749A67950FB66 /* DeletionRecord.swift in Sources */,
 				625ACA8BE4F911CC7406ABBB /* DeviceIdentifier.swift in Sources */,
 				761C547849CDD7491920F61F /* HKQuantityType+Extensions.swift in Sources */,

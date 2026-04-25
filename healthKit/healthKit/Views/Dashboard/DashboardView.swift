@@ -83,10 +83,11 @@ struct DashboardView: View {
 
     private func syncSection(viewModel: DashboardViewModel) -> some View {
         SyncStatusCard(
-            isSyncing: viewModel.isSyncing,
-            lastSyncDate: viewModel.lastSyncDate,
-            lastSyncRecordCount: viewModel.lastSyncRecordCount,
-            onSync: { Task { await viewModel.syncNow() } }
+            syncStatus: syncCoordinator.syncStatus,
+            lastSyncDate: syncCoordinator.lastSyncDate,
+            lastSyncRecordCount: syncCoordinator.lastSyncRecordCount,
+            onSync: { Task { await viewModel.syncNow() } },
+            onRetry: { Task { await viewModel.syncNow() } }
         )
     }
 

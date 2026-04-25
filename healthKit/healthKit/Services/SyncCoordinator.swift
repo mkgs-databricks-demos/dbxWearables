@@ -7,27 +7,42 @@ import OSLog
 /// All sample types are synced concurrently via TaskGroup. Each type runs its own
 /// independent query → POST → anchor-persist loop, so they make progress in parallel.
 /// URLSession's per-host connection limit (~6) naturally throttles in-flight POSTs.
+@MainActor
 final class SyncCoordinator: ObservableObject {
 
     private let queryService: HealthKitQueryService
     private let apiService: APIService
     private let syncStateRepository: SyncStateRepository
     let syncLedger: SyncLedger
+    private let networkMonitor: NetworkMonitor
 
     @Published var lastSyncDate: Date?
     @Published var isSyncing = false
     @Published var lastSyncRecordCount = 0
-
+    
+    // Enhanced status tracking
+    @Published var syncStatus: SyncStatus = .idle
+    @Published var networkStatus: NetworkStatus = .unknown
+    
     init(
         healthStore: HKHealthStore,
         apiService: APIService = APIService(),
         syncStateRepository: SyncStateRepository = SyncStateRepository(),
-        syncLedger: SyncLedger = SyncLedger()
+        syncLedger: SyncLedger = SyncLedger(),
+        networkMonitor: NetworkMonitor? = nil
     ) {
         self.queryService = HealthKitQueryService(healthStore: healthStore)
         self.apiService = apiService
         self.syncStateRepository = syncStateRepository
         self.syncLedger = syncLedger
+        self.networkMonitor = networkMonitor ?? NetworkMonitor()
+        
+        // Observe network status
+        Task {
+            for await status in self.networkMonitor.$status.values {
+                self.networkStatus = status
+            }
+        }
     }
 
     /// Run a full sync cycle for all configured HealthKit types concurrently.
@@ -40,8 +55,26 @@ final class SyncCoordinator: ObservableObject {
     ///   limit, larger batches); `.background` when triggered by an observer query (~30s
     ///   execution window, smaller batches to maximize per-type progress).
     func sync(context: SyncContext = .background) async {
-        await MainActor.run { isSyncing = true }
-        defer { Task { @MainActor in isSyncing = false } }
+        let startTime = Date()
+        
+        Log.sync.info("🚀 Starting sync (context: \(context == .foreground ? "foreground" : "background"))")
+        
+        // Check network connectivity first
+        guard networkMonitor.canSync else {
+            Log.sync.warning("⚠️ Sync aborted: offline")
+            syncStatus = .failed(error: .offline)
+            return
+        }
+        
+        isSyncing = true
+        syncStatus = .syncing(progress: SyncProgress(
+            currentType: "Starting sync...",
+            completedTypes: 0,
+            totalTypes: 15, // Approximate
+            recordsUploaded: 0
+        ))
+        
+        Log.sync.info("✓ Set isSyncing = true, syncStatus = .syncing")
 
         let batchSize = HealthKitConfiguration.queryBatchSize(for: context)
 
@@ -90,10 +123,41 @@ final class SyncCoordinator: ObservableObject {
             return total
         }
 
-        await MainActor.run {
-            lastSyncDate = Date()
-            lastSyncRecordCount = totalRecords
-        }
+        let duration = Date().timeIntervalSince(startTime)
+        let stats = await syncLedger.getStats()
+        
+        // Update all state together atomically on MainActor
+        await updateSyncCompletion(
+            totalRecords: totalRecords,
+            stats: stats,
+            duration: duration
+        )
+    }
+    
+    /// Update all sync completion state atomically
+    private func updateSyncCompletion(
+        totalRecords: Int,
+        stats: SyncStats,
+        duration: TimeInterval
+    ) async {
+        Log.sync.info("📊 Sync completed: \(totalRecords) records in \(String(format: "%.1f", duration))s")
+        
+        lastSyncDate = Date()
+        lastSyncRecordCount = totalRecords
+        
+        syncStatus = .success(summary: SyncSummary(
+            totalRecords: totalRecords,
+            recordsByType: stats.totalRecordsSent,
+            duration: duration,
+            timestamp: Date()
+        ))
+        
+        Log.sync.info("✅ Updated syncStatus to .success")
+        
+        // Set isSyncing to false AFTER setting success status
+        isSyncing = false
+        
+        Log.sync.info("✅ Set isSyncing = false")
     }
 
     // MARK: - Per-type batched sync
@@ -111,7 +175,7 @@ final class SyncCoordinator: ObservableObject {
     /// window expires mid-loop, all previously completed batches are already persisted.
     ///
     /// Returns the total number of records uploaded across all batches.
-    private func syncSampleType<T: Encodable>(
+    nonisolated private func syncSampleType<T: Encodable>(
         _ sampleType: HKSampleType,
         batchSize: Int,
         recordType: String,
@@ -196,7 +260,7 @@ final class SyncCoordinator: ObservableObject {
     ///
     /// This is safe because sleep volume is low — a full year is ~3-5K stage samples
     /// (~1 MB of NDJSON), well within memory and upload time budgets.
-    private func syncSleep() async -> Int {
+    nonisolated private func syncSleep() async -> Int {
         let sleepType = HKCategoryType(.sleepAnalysis)
         let currentAnchor = syncStateRepository.anchor(for: sleepType)
 
@@ -247,7 +311,7 @@ final class SyncCoordinator: ObservableObject {
     ///
     /// Returns `true` if the POST succeeded (first attempt or retry).
     /// On success, records the payload and metadata in SyncLedger for demo inspection.
-    private func postBatchWithRetry<T: Encodable>(
+    nonisolated private func postBatchWithRetry<T: Encodable>(
         _ records: [T],
         recordType: String,
         label: String
@@ -309,7 +373,7 @@ final class SyncCoordinator: ObservableObject {
 
     /// Fetch activity summaries since the last sync date. Unlike sample types, activity
     /// summaries don't support anchored queries — we track the last sync date instead.
-    private func syncActivitySummaries() async -> Int {
+    nonisolated private func syncActivitySummaries() async -> Int {
         let syncKey = "activity_summaries"
         let startDate = syncStateRepository.lastSyncDate(for: syncKey)
             ?? Calendar.current.date(byAdding: .day, value: -7, to: Date())!
