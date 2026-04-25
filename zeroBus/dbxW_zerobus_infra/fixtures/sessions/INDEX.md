@@ -2,6 +2,7 @@
 
 | Date | Session | File |
 | --- | --- | --- |
+| 2026-04-25 | Lakehouse Sync removal, infra deploy, app bundle readiness audit | [2026-04-25_cleanup-and-deploy-readiness.md](2026-04-25_cleanup-and-deploy-readiness.md) |
 | 2026-04-25 | Auth Infrastructure — iOS SPN, JWT Secret, Apple Bundle ID Provisioning | [2026-04-25_auth-infrastructure-provisioning.md](2026-04-25_auth-infrastructure-provisioning.md) |
 | 2026-04-17 | Terraform branch rename fix, git index recovery, two-step deploy, auto-created resource pattern | [2026-04-17_terraform-branch-rename-fix.md](2026-04-17_terraform-branch-rename-fix.md) |
 | 2026-04-17 | Lakebase resources, endpoint conflict fix, Data API architecture discovery, deploy.sh checks | [2026-04-17_lakebase-resources-and-data-api.md](2026-04-17_lakebase-resources-and-data-api.md) |
