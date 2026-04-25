@@ -193,7 +193,8 @@ targets:
       client_secret_dbs_key: client_secret_${var.schema}
       postgres_branch: projects/dbxw-zerobus-wearables/branches/production
       postgres_database: projects/dbxw-zerobus-wearables/branches/production/databases/db-0k31-aj7nvq8pgr
-      zerobus_stream_pool_size: "2"
+      zerobus_stream_pool_size: "1"
+
 
   # ── hls_fde (production — same workspace as dev) ────────────────────────
   hls_fde:
