@@ -261,7 +261,13 @@ final class SyncCoordinator: ObservableObject {
             return false
         }
 
-        let headers = apiService.buildRequestHeaders(for: recordType)
+        let headers: [String: String]
+        do {
+            headers = try await apiService.buildRequestHeaders(for: recordType)
+        } catch {
+            Log.sync.error("\(label): failed to build request headers — \(error.localizedDescription)")
+            return false
+        }
 
         do {
             let response = try await apiService.postRecords(records, recordType: recordType)

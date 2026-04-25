@@ -4,6 +4,7 @@ import XCTest
 final class APIServiceTests: XCTestCase {
 
     private var sut: APIService!
+    private var mockAuth: MockAuthService!
 
     override func setUp() {
         super.setUp()
@@ -13,11 +14,13 @@ final class APIServiceTests: XCTestCase {
 
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockURLProtocol.self]
-        sut = APIService(session: URLSession(configuration: config))
+        mockAuth = MockAuthService(token: "test-token-abc")
+        sut = APIService(session: URLSession(configuration: config), auth: mockAuth)
     }
 
     override func tearDown() {
         sut = nil
+        mockAuth = nil
         MockURLProtocol.requestHandler = nil
         super.tearDown()
     }
@@ -109,6 +112,59 @@ final class APIServiceTests: XCTestCase {
         }
     }
 
+    // MARK: - 401 Refresh-Retry
+
+    func testPostPayloadRetriesOnceAfter401AndInvalidatesToken() async throws {
+        // First response is 401, second is 200.
+        var callCount = 0
+        let json = #"{"status":"ok"}"#
+
+        MockURLProtocol.requestHandler = { request in
+            callCount += 1
+            let statusCode = (callCount == 1) ? 401 : 200
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: statusCode, httpVersion: nil, headerFields: nil
+            )!
+            return (response, Data(json.utf8))
+        }
+
+        let response = try await sut.postRecords([makeSample()], recordType: "samples")
+
+        XCTAssertEqual(response.status, "ok")
+        XCTAssertEqual(callCount, 2, "Expected exactly two HTTP calls (401 then 200)")
+
+        let invalidateCount = await mockAuth.invalidateCallCount
+        XCTAssertEqual(invalidateCount, 1, "Cached token should be invalidated once on 401")
+
+        let bearerCount = await mockAuth.bearerCallCount
+        XCTAssertEqual(bearerCount, 2, "Bearer token should be fetched twice (one per attempt)")
+    }
+
+    func testPostPayloadDoesNotRetryAgainIfSecond401() async {
+        var callCount = 0
+
+        MockURLProtocol.requestHandler = { request in
+            callCount += 1
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil
+            )!
+            return (response, Data())
+        }
+
+        do {
+            _ = try await sut.postRecords([makeSample()], recordType: "samples")
+            XCTFail("Expected APIError.httpError to be thrown on persistent 401")
+        } catch let error as APIError {
+            guard case .httpError(let statusCode) = error else {
+                return XCTFail("Wrong APIError case")
+            }
+            XCTAssertEqual(statusCode, 401)
+            XCTAssertEqual(callCount, 2, "Should retry exactly once on 401, then surface the error")
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
     // MARK: - Request Headers
 
     func testPostPayloadIncludesExpectedHeaders() async throws {
@@ -135,10 +191,6 @@ final class APIServiceTests: XCTestCase {
     }
 
     func testPostPayloadIncludesAuthorizationHeader() async throws {
-        // Store a test token so APIService picks it up via KeychainHelper.
-        KeychainHelper.set("test-token-abc", for: KeychainHelper.Key.oauthAccessToken)
-        defer { KeychainHelper.delete(for: KeychainHelper.Key.oauthAccessToken) }
-
         var capturedRequest: URLRequest?
         let json = #"{"status":"ok"}"#
 

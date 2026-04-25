@@ -4,31 +4,34 @@ import Foundation
 final class APIService {
 
     private let session: URLSession
+    private let auth: AuthProviding
     private let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return decoder
     }()
 
-    init(session: URLSession = .shared) {
+    init(session: URLSession = .shared, auth: AuthProviding = AuthService()) {
         self.session = session
+        self.auth = auth
     }
 
     /// Build the metadata headers sent with every POST request.
     /// Exposed so callers (e.g., SyncCoordinator) can capture headers for the SyncLedger.
-    func buildRequestHeaders(for recordType: String) -> [String: String] {
-        var headers: [String: String] = [
+    ///
+    /// `async throws` because the bearer token may need to be fetched/refreshed via
+    /// the OAuth token endpoint.
+    func buildRequestHeaders(for recordType: String) async throws -> [String: String] {
+        let token = try await auth.bearerToken()
+        return [
             "Content-Type": "application/x-ndjson",
             "X-Device-Id": DeviceIdentifier.current,
             "X-Platform": "apple_healthkit",
             "X-App-Version": appVersion,
             "X-Upload-Timestamp": DateFormatters.iso8601WithTimezone.string(from: Date()),
             "X-Record-Type": recordType,
+            "Authorization": "Bearer \(token)",
         ]
-        if let token = KeychainHelper.get(for: KeychainHelper.Key.oauthAccessToken) {
-            headers["Authorization"] = "Bearer \(token)"
-        }
-        return headers
     }
 
     /// Post an array of Encodable records as NDJSON to the Databricks ingestion endpoint.
@@ -41,10 +44,23 @@ final class APIService {
     /// The `recordType` header tells the Databricks App what kind of records are in
     /// the body (e.g., "samples", "workouts", "sleep", "activity_summaries") so it can
     /// route to the appropriate ZeroBus topic or bronze table.
+    ///
+    /// On HTTP 401, the cached token is invalidated and the request is retried once
+    /// with a freshly minted bearer token. This handles server-side token revocation.
     func postRecords<T: Encodable>(_ records: [T], recordType: String) async throws -> APIResponse {
         let url = APIConfiguration.baseURL.appendingPathComponent(APIConfiguration.ingestPath)
         let body = try NDJSONSerializer.encode(records)
-        let headers = buildRequestHeaders(for: recordType)
+
+        do {
+            return try await sendRequest(url: url, body: body, recordType: recordType)
+        } catch APIError.httpError(let statusCode) where statusCode == 401 {
+            await auth.invalidateCachedToken()
+            return try await sendRequest(url: url, body: body, recordType: recordType)
+        }
+    }
+
+    private func sendRequest(url: URL, body: Data, recordType: String) async throws -> APIResponse {
+        let headers = try await buildRequestHeaders(for: recordType)
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
