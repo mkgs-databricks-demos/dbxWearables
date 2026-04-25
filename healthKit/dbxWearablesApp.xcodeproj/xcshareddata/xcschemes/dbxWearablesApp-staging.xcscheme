@@ -27,7 +27,7 @@
       buildConfiguration = "Debug"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
-      shouldUseLaunchSchemeArgsEnv = "NO"
+      shouldUseLaunchSchemeArgsEnv = "YES"
       codeCoverageEnabled = "YES"
       onlyGenerateCoverageForSpecifiedTargets = "NO">
       <MacroExpansion>
@@ -65,18 +65,6 @@
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>
-      <EnvironmentVariables>
-         <EnvironmentVariable
-            key = "DBX_API_BASE_URL"
-            value = "https://dev-dbxw-0bus-ingest-7474657291520070.aws.databricksapps.com"
-            isEnabled = "YES">
-         </EnvironmentVariable>
-         <EnvironmentVariable
-            key = "DBX_WORKSPACE_HOST"
-            value = "https://fevm-hls-fde.cloud.databricks.com"
-            isEnabled = "YES">
-         </EnvironmentVariable>
-      </EnvironmentVariables>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"
@@ -103,19 +91,19 @@
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "DBX_API_BASE_URL"
-            value = "https://dev-dbxw-0bus-ingest-7474657291520070.aws.databricksapps.com"
+            value = "https://TODO-staging-gateway.aws.databricksapps.com"
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
             key = "DBX_WORKSPACE_HOST"
-            value = "https://fevm-hls-fde.cloud.databricks.com"
+            value = "https://TODO-staging-workspace.cloud.databricks.com"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
-      shouldUseLaunchSchemeArgsEnv = "NO"
+      shouldUseLaunchSchemeArgsEnv = "YES"
       savedToolIdentifier = ""
       useCustomWorkingDirectory = "NO"
       debugDocumentVersioning = "YES">
@@ -131,18 +119,6 @@
       </BuildableProductRunnable>
       <CommandLineArguments>
       </CommandLineArguments>
-      <EnvironmentVariables>
-         <EnvironmentVariable
-            key = "DBX_API_BASE_URL"
-            value = "https://dev-dbxw-0bus-ingest-7474657291520070.aws.databricksapps.com"
-            isEnabled = "YES">
-         </EnvironmentVariable>
-         <EnvironmentVariable
-            key = "DBX_WORKSPACE_HOST"
-            value = "https://fevm-hls-fde.cloud.databricks.com"
-            isEnabled = "YES">
-         </EnvironmentVariable>
-      </EnvironmentVariables>
    </ProfileAction>
    <AnalyzeAction
       buildConfiguration = "Debug">

@@ -42,18 +42,6 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
     dependencies:
       - sdk: HealthKit.framework
-    scheme:
-      environmentVariables:
-        - variable: DBX_API_BASE_URL
-          value: "https://dev-dbxw-0bus-ingest-7474657291520070.aws.databricksapps.com"
-          isEnabled: true
-        - variable: DBX_WORKSPACE_HOST
-          value: "https://fevm-hls-fde.cloud.databricks.com"
-          isEnabled: true
-      testTargets:
-        - healthKitTests
-        - healthKitUITests
-      gatherCoverageData: true
 
   healthKitTests:
     type: bundle.unit-test
@@ -85,3 +73,93 @@ targets:
         TEST_TARGET_NAME: dbxWearablesApp
     dependencies:
       - target: dbxWearablesApp
+
+# One scheme per Databricks Asset Bundle target. Selecting a scheme in Xcode
+# (or passing -scheme to xcodebuild) decides which gateway URL + workspace
+# host the app POSTs to. Add a new scheme here when a new bundle target is
+# deployed; the SPN credentials remain device-local in the Keychain.
+schemes:
+  dbxWearablesApp-dev:
+    build:
+      targets:
+        dbxWearablesApp: all
+    run:
+      config: Debug
+      environmentVariables:
+        - variable: DBX_API_BASE_URL
+          value: "https://dev-dbxw-0bus-ingest-7474657291520070.aws.databricksapps.com"
+          isEnabled: true
+        - variable: DBX_WORKSPACE_HOST
+          value: "https://fevm-hls-fde.cloud.databricks.com"
+          isEnabled: true
+    test:
+      config: Debug
+      gatherCoverageData: true
+      targets:
+        - healthKitTests
+        - healthKitUITests
+      environmentVariables:
+        - variable: DBX_API_BASE_URL
+          value: "https://dev-dbxw-0bus-ingest-7474657291520070.aws.databricksapps.com"
+          isEnabled: true
+        - variable: DBX_WORKSPACE_HOST
+          value: "https://fevm-hls-fde.cloud.databricks.com"
+          isEnabled: true
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  dbxWearablesApp-staging:
+    build:
+      targets:
+        dbxWearablesApp: all
+    run:
+      config: Debug
+      environmentVariables:
+        - variable: DBX_API_BASE_URL
+          value: "https://TODO-staging-gateway.aws.databricksapps.com"
+          isEnabled: true
+        - variable: DBX_WORKSPACE_HOST
+          value: "https://TODO-staging-workspace.cloud.databricks.com"
+          isEnabled: true
+    test:
+      config: Debug
+      gatherCoverageData: true
+      targets:
+        - healthKitTests
+        - healthKitUITests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  dbxWearablesApp-prod:
+    build:
+      targets:
+        dbxWearablesApp: all
+    run:
+      config: Release
+      environmentVariables:
+        - variable: DBX_API_BASE_URL
+          value: "https://TODO-prod-gateway.aws.databricksapps.com"
+          isEnabled: true
+        - variable: DBX_WORKSPACE_HOST
+          value: "https://TODO-prod-workspace.cloud.databricks.com"
+          isEnabled: true
+    test:
+      config: Debug
+      gatherCoverageData: true
+      targets:
+        - healthKitTests
+        - healthKitUITests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
