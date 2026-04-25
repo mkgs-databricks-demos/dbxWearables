@@ -25,7 +25,7 @@ final class APIService {
             "X-Upload-Timestamp": DateFormatters.iso8601WithTimezone.string(from: Date()),
             "X-Record-Type": recordType,
         ]
-        if let token = KeychainHelper.retrieveAPIToken() {
+        if let token = KeychainHelper.get(for: KeychainHelper.Key.oauthAccessToken) {
             headers["Authorization"] = "Bearer \(token)"
         }
         return headers

@@ -167,8 +167,8 @@ final class APIServiceTests: XCTestCase {
 
     func testPostPayloadIncludesAuthorizationHeader() async throws {
         // Store a test token so APIService picks it up via KeychainHelper.
-        KeychainHelper.saveAPIToken("test-token-abc")
-        defer { KeychainHelper.saveAPIToken("") }
+        KeychainHelper.set("test-token-abc", for: KeychainHelper.Key.oauthAccessToken)
+        defer { KeychainHelper.delete(for: KeychainHelper.Key.oauthAccessToken) }
 
         var capturedRequest: URLRequest?
         let json = #"{"status":"ok"}"#
