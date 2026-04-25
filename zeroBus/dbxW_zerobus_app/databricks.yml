@@ -102,7 +102,7 @@ variables:
   # Value is stored in the secret scope (key: zerobus_stream_pool_size) and
   # injected as ZEROBUS_STREAM_POOL_SIZE env var via the app resource.
   # Populate via: databricks secrets put-secret \
-  #   --scope dbxw_zerobus_credentials --key zerobus_stream_pool_size \
+  #   dbxw_zerobus_credentials zerobus_stream_pool_size \
   #   --string-value "<value>"
   zerobus_stream_pool_size:
     description: >
@@ -110,6 +110,40 @@ variables:
       More streams = higher throughput at the cost of more connections.
       The service falls back to 4 if the env var is unset.
     default: "4"
+
+  # ── JWT Authentication (Phase 1) ────────────────────────────────────
+  #
+  # App-managed JWT auth for mobile clients via Sign in with Apple.
+  # See server/services/auth-service.ts for the implementation.
+  #
+  # Graceful degradation: if the signing secret is not provisioned, the
+  # auth service stays uninitialized and auth endpoints return 503.
+  # The rest of the app (ZeroBus ingest, Lakebase, admin UI) works normally.
+  #
+  # Provision secrets:
+  #   databricks secrets put-secret dbxw_zerobus_credentials jwt_signing_secret \
+  #     --string-value "$(openssl rand -base64 32)"
+  #   databricks secrets put-secret dbxw_zerobus_credentials apple_bundle_id \
+  #     --string-value "com.dbxwearables.healthKit"
+  #   databricks secrets put-secret dbxw_zerobus_credentials ios_spn_application_id \
+  #     --string-value "<spn-application-id-uuid>"
+
+  jwt_signing_secret_key:
+    description: >
+      The key name for the JWT signing secret in the secret scope.
+      Used by the auth service to sign app-issued JWTs (HS256).
+    default: jwt_signing_secret
+  apple_bundle_id_key:
+    description: >
+      The key name for the Apple bundle ID in the secret scope.
+      Used to validate the `aud` claim in Apple identity tokens.
+    default: apple_bundle_id
+  ios_spn_application_id_key:
+    description: >
+      The key name for the iOS bootstrap SPN application_id in the secret scope.
+      Used by the route guard (spn-route-guard.ts) to verify the SPN's identity
+      and restrict it to auth routes only.
+    default: ios_spn_application_id
 
   # Tags — applied to all deployed resources via presets
   tags_project:
