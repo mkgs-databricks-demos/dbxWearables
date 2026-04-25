@@ -4,6 +4,9 @@ import SwiftUI
 struct AboutView: View {
     @StateObject private var permissionsViewModel = PermissionsViewModel()
     @State private var showOnboarding = false
+    #if DEBUG
+    @State private var showSPNCredentials = false
+    #endif
 
     var body: some View {
         NavigationStack {
@@ -18,6 +21,9 @@ struct AboutView: View {
                     howDataIsSentSection
                     permissionsSection
                     settingsSection
+                    #if DEBUG
+                    spnCredentialsSection
+                    #endif
                     replayOnboardingSection
                 }
                 .padding(.horizontal)
@@ -29,8 +35,46 @@ struct AboutView: View {
             .sheet(isPresented: $showOnboarding) {
                 OnboardingView(isPresented: $showOnboarding)
             }
+            #if DEBUG
+            .sheet(isPresented: $showSPNCredentials) {
+                SPNCredentialsView()
+            }
+            #endif
         }
     }
+
+    #if DEBUG
+    // MARK: - SPN Credentials (Debug)
+
+    private var spnCredentialsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("Service Principal Credentials")
+
+            HStack {
+                Image(systemName: spnConfigured ? "checkmark.shield.fill" : "exclamationmark.shield")
+                    .foregroundStyle(spnConfigured ? DBXColors.dbxGreen : DBXColors.dbxYellow)
+                Text(spnConfigured ? "Credentials configured" : "Credentials not configured")
+                    .font(.subheadline)
+            }
+
+            Button("Configure") {
+                showSPNCredentials = true
+            }
+            .buttonStyle(DBXSecondaryButtonStyle())
+
+            Text("Debug builds only. Paste a Databricks service-principal client ID + secret to enable OAuth bearer-token requests.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dbxCard()
+    }
+
+    private var spnConfigured: Bool {
+        KeychainHelper.exists(for: KeychainHelper.Key.databricksClientID)
+            && KeychainHelper.exists(for: KeychainHelper.Key.databricksClientSecret)
+    }
+    #endif
 
     // MARK: - Purpose
 

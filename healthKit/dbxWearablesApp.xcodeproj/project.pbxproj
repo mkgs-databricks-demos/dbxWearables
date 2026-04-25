@@ -47,6 +47,7 @@
 		9BA554890E77D12912991626 /* WorkoutRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0182D1D387E5E112097EC48 /* WorkoutRecord.swift */; };
 		9DFC0BC9AE087939B9D1DA36 /* HealthKitConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FA0E004A7DC1F76DDD5E912 /* HealthKitConfiguration.swift */; };
 		9F7B8A20F98F58FA629FE69F /* SyncRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 183B7B186EF23731B9CA9104 /* SyncRecord.swift */; };
+		A08FEBF6AA3B60852D88280A /* SPNCredentialsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06D5EC77EA32591331F745E1 /* SPNCredentialsView.swift */; };
 		A2CE00199C94EBEC587CDD5C /* MockAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 113902C3534F838C3958E426 /* MockAuthService.swift */; };
 		AEC1FBB26180060D2BB757C4 /* MockURLProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BCA9780775DB0D5356CEE19 /* MockURLProtocol.swift */; };
 		B0004CF6BD196732DFB4922B /* SyncStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADE09F3821FB596BF1F710CF /* SyncStats.swift */; };
@@ -89,6 +90,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		06D5EC77EA32591331F745E1 /* SPNCredentialsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SPNCredentialsView.swift; sourceTree = "<group>"; };
 		070766A51CBAC04E37478A81 /* Logger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
 		10FC9C995E8483DC5F84D7D4 /* DataExplorerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataExplorerView.swift; sourceTree = "<group>"; };
 		113902C3534F838C3958E426 /* MockAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockAuthService.swift; sourceTree = "<group>"; };
@@ -364,6 +366,7 @@
 			children = (
 				D81665B1BF0B72B2D44A7074 /* AboutView.swift */,
 				6541C1C01BE4D815B50FD43E /* DataFlowDiagramView.swift */,
+				06D5EC77EA32591331F745E1 /* SPNCredentialsView.swift */,
 			);
 			path = About;
 			sourceTree = "<group>";
@@ -613,6 +616,7 @@
 				DAFEE242A161036772BD847E /* PayloadInspectorViewModel.swift in Sources */,
 				6D2C8120CD618101F676972A /* PermissionsView.swift in Sources */,
 				793E81090E41B0544A46A45A /* PermissionsViewModel.swift in Sources */,
+				A08FEBF6AA3B60852D88280A /* SPNCredentialsView.swift in Sources */,
 				0581EA58D018B1610C880462 /* SleepMapper.swift in Sources */,
 				E0CFEB52E74DB9D97FB970B8 /* SleepRecord.swift in Sources */,
 				0132082917F3C23F9488B35C /* SyncCoordinator.swift in Sources */,
