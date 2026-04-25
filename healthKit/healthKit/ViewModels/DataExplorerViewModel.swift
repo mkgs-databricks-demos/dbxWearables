@@ -5,7 +5,7 @@ import OSLog
 @MainActor
 final class DataExplorerViewModel: ObservableObject {
 
-    private let syncLedger: SyncLedger
+    var syncLedger: SyncLedger
 
     @Published var stats: SyncStats = .empty
 
@@ -14,7 +14,9 @@ final class DataExplorerViewModel: ObservableObject {
     }
 
     func loadStats() async {
+        print("📊 DataExplorerViewModel: loadStats() called")
         stats = await syncLedger.getStats()
+        print("📊 DataExplorerViewModel: Loaded stats - totalRecordsSent: \(stats.totalRecordsSent)")
     }
 
     /// Summary rows for the top-level list.

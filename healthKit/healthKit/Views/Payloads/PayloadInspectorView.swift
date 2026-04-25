@@ -4,19 +4,23 @@ import SwiftUI
 /// Terminal-aesthetic dark viewer for demo verification.
 struct PayloadInspectorView: View {
     @EnvironmentObject private var syncCoordinator: SyncCoordinator
-    @State private var viewModel: PayloadInspectorViewModel?
+    @StateObject private var viewModel: PayloadInspectorViewModel
     @State private var showCopiedToast = false
+    @State private var isVisible = false
+    
+    init() {
+        // Create with a temporary SyncLedger - will be replaced in task
+        _viewModel = StateObject(wrappedValue: PayloadInspectorViewModel(syncLedger: SyncLedger()))
+    }
 
     var body: some View {
         NavigationStack {
-            if let viewModel {
-                payloadInspectorContent(viewModel: viewModel)
-            } else {
-                ProgressView()
-                    .onAppear {
-                        self.viewModel = PayloadInspectorViewModel(syncLedger: syncCoordinator.syncLedger)
-                    }
-            }
+            payloadInspectorContent(viewModel: viewModel)
+                .task {
+                    // Replace the dummy syncLedger with the real one
+                    viewModel.syncLedger = syncCoordinator.syncLedger
+                    await viewModel.loadPayload()
+                }
         }
     }
     
@@ -35,21 +39,30 @@ struct PayloadInspectorView: View {
                 emptyState
             }
         }
+        .id(viewModel.selectedRecordType) // Force view refresh when selection changes
         .background(DBXColors.dbxLightGray)
         .navigationTitle("Payloads")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    viewModel.copyPayloadToClipboard()
-                    showCopiedToast = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                        showCopiedToast = false
+                HStack(spacing: 12) {
+                    Button {
+                        Task { await viewModel.loadPayload() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
                     }
-                } label: {
-                    Image(systemName: "doc.on.doc")
+                    
+                    Button {
+                        viewModel.copyPayloadToClipboard()
+                        showCopiedToast = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            showCopiedToast = false
+                        }
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                    }
+                    .disabled(viewModel.lastPayload == nil)
                 }
-                .disabled(viewModel.lastPayload == nil)
             }
         }
         .overlay(alignment: .top) {
@@ -58,8 +71,21 @@ struct PayloadInspectorView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .task {
+        .refreshable {
             await viewModel.loadPayload()
+        }
+        .onAppear {
+            isVisible = true
+            Task { await viewModel.loadPayload() }
+        }
+        .onDisappear {
+            isVisible = false
+        }
+        .onChange(of: syncCoordinator.lastSyncDate) { _, _ in
+            // Reload payload whenever a sync completes
+            if isVisible {
+                Task { await viewModel.loadPayload() }
+            }
         }
     }
 
@@ -69,27 +95,50 @@ struct PayloadInspectorView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(PayloadInspectorViewModel.recordTypes, id: \.self) { type in
-                    Button {
-                        viewModel.selectedRecordType = type
-                        Task { await viewModel.loadPayload() }
-                    } label: {
-                        Text(displayName(for: type))
-                            .font(.system(size: 13, weight: .medium))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(
-                                viewModel.selectedRecordType == type
-                                    ? DBXColors.dbxRed
-                                    : DBXColors.dbxCardBackground
-                            )
-                            .foregroundStyle(
-                                viewModel.selectedRecordType == type ? .white : .primary
-                            )
-                            .clipShape(Capsule())
-                    }
+                    categoryButton(for: type, viewModel: viewModel)
                 }
             }
+            .padding(.horizontal, 4)
         }
+    }
+    
+    private func categoryButton(for type: String, viewModel: PayloadInspectorViewModel) -> some View {
+        let isSelected = viewModel.selectedRecordType == type
+        let hasData = viewModel.hasPayload(for: type)
+        
+        return Button {
+            print("🔘 Tapped button for: \(type)")
+            print("   Current selected: \(viewModel.selectedRecordType)")
+            print("   Has data: \(hasData)")
+            viewModel.selectedRecordType = type
+            print("   New selected: \(viewModel.selectedRecordType)")
+            Task { 
+                await viewModel.loadPayload()
+                print("   Payload loaded for: \(type)")
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(displayName(for: type))
+                    .font(.system(size: 13, weight: .medium))
+                
+                // Show badge if this type has data
+                if hasData {
+                    Circle()
+                        .fill(isSelected ? .white : DBXColors.dbxGreen)
+                        .frame(width: 6, height: 6)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                isSelected ? DBXColors.dbxRed : DBXColors.dbxCardBackground
+            )
+            .foregroundStyle(
+                isSelected ? .white : .primary
+            )
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Metadata Banner

@@ -3,18 +3,22 @@ import SwiftUI
 /// Tab 2: Per-category breakdown of data sent to Databricks.
 struct DataExplorerView: View {
     @EnvironmentObject private var syncCoordinator: SyncCoordinator
-    @State private var viewModel: DataExplorerViewModel?
+    @StateObject private var viewModel: DataExplorerViewModel
+    @State private var isVisible = false
+    
+    init() {
+        // Create with a temporary SyncLedger - will be replaced in task
+        _viewModel = StateObject(wrappedValue: DataExplorerViewModel(syncLedger: SyncLedger()))
+    }
 
     var body: some View {
         NavigationStack {
-            if let viewModel {
-                dataExplorerContent(viewModel: viewModel)
-            } else {
-                ProgressView()
-                    .onAppear {
-                        self.viewModel = DataExplorerViewModel(syncLedger: syncCoordinator.syncLedger)
-                    }
-            }
+            dataExplorerContent(viewModel: viewModel)
+                .task {
+                    // Replace the dummy syncLedger with the real one
+                    viewModel.syncLedger = syncCoordinator.syncLedger
+                    await viewModel.loadStats()
+                }
         }
     }
     
@@ -35,8 +39,30 @@ struct DataExplorerView: View {
         }
         .navigationTitle("Data Explorer")
         .navigationBarTitleDisplayMode(.inline)
-        .task {
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    Task { await viewModel.loadStats() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+            }
+        }
+        .refreshable {
             await viewModel.loadStats()
+        }
+        .onAppear {
+            isVisible = true
+            Task { await viewModel.loadStats() }
+        }
+        .onDisappear {
+            isVisible = false
+        }
+        .onChange(of: syncCoordinator.lastSyncDate) { _, _ in
+            // Reload stats whenever a sync completes
+            if isVisible {
+                Task { await viewModel.loadStats() }
+            }
         }
     }
 

@@ -26,6 +26,7 @@ struct AboutView: View {
                     permissionsSection
                     settingsSection
                     #if DEBUG
+                    debugInfoSection
                     testDataSection
                     spnCredentialsSection
                     #endif
@@ -63,7 +64,68 @@ struct AboutView: View {
     }
 
     #if DEBUG
+    // MARK: - Debug Info (Debug)
+    
+    private var debugInfoSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("Debug Info")
+            
+            Button {
+                printSyncLedgerInfo()
+            } label: {
+                HStack {
+                    Image(systemName: "folder.badge.questionmark")
+                    Text("Print Sync Ledger Files")
+                    Spacer()
+                }
+            }
+            .buttonStyle(DBXSecondaryButtonStyle())
+            
+            Text("Prints the Documents directory path and lists all sync_ledger files in the console. Use this to debug what data has been saved.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dbxCard()
+    }
+    
+    private func printSyncLedgerInfo() {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let syncLedgerDir = docs.appendingPathComponent("sync_ledger")
+        
+        print("\n" + String(repeating: "=", count: 60))
+        print("📁 SYNC LEDGER DEBUG INFO")
+        print(String(repeating: "=", count: 60))
+        print("Documents Directory: \(docs.path)")
+        print("Sync Ledger Directory: \(syncLedgerDir.path)")
+        print(String(repeating: "-", count: 60))
+        
+        if let files = try? FileManager.default.contentsOfDirectory(
+            at: syncLedgerDir,
+            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey],
+            options: .skipsHiddenFiles
+        ) {
+            print("Files in sync_ledger/ (\(files.count) total):")
+            for file in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+                let attrs = try? FileManager.default.attributesOfItem(atPath: file.path)
+                let size = attrs?[.size] as? Int64 ?? 0
+                let modDate = attrs?[.modificationDate] as? Date
+                
+                let sizeStr = ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+                let dateStr = modDate.map { DateFormatter.localizedString(from: $0, dateStyle: .short, timeStyle: .short) } ?? "unknown"
+                
+                print("  📄 \(file.lastPathComponent)")
+                print("      Size: \(sizeStr), Modified: \(dateStr)")
+            }
+        } else {
+            print("⚠️ Could not read sync_ledger directory (may not exist yet)")
+        }
+        
+        print(String(repeating: "=", count: 60) + "\n")
+    }
+
     // MARK: - Test Data Generation (Debug)
+
 
     private var testDataSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -326,13 +388,20 @@ struct AboutView: View {
             HStack {
                 Image(systemName: isAuthorized ? "checkmark.shield.fill" : "exclamationmark.shield")
                     .foregroundStyle(isAuthorized ? DBXColors.dbxGreen : DBXColors.dbxYellow)
-                Text(isAuthorized ? "Access granted" : "Access not yet granted")
+                Text(isAuthorized ? "Authorization requested" : "Not yet requested")
                     .font(.subheadline)
             }
 
-            if !isAuthorized {
-                Button("Request Access") {
-                    Task { await permissionsViewModel?.requestAuthorization() }
+            HStack(spacing: 8) {
+                if !isAuthorized {
+                    Button("Request Access") {
+                        Task { await permissionsViewModel?.requestAuthorization() }
+                    }
+                    .buttonStyle(DBXSecondaryButtonStyle())
+                }
+                
+                Button(action: openAppSettings) {
+                    Label("Open Settings", systemImage: "gear")
                 }
                 .buttonStyle(DBXSecondaryButtonStyle())
             }
@@ -344,12 +413,21 @@ struct AboutView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .dbxCard()
     }
+    
+    private func openAppSettings() {
+        // Open iOS Settings app (always works, no sandbox errors)
+        if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(settingsURL)
+        }
+    }
 
     private var permissionsFooter: String {
+        let baseText = "To verify permissions:\n1. Open Health app\n2. Tap Profile (top right)\n3. Scroll to Apps\n4. Tap dbxWearables\n\nDue to privacy, this app cannot detect if access was granted."
+        
         #if DEBUG
-        return "This app only reads health data. It never writes to HealthKit. Debug builds request write permissions for test data generation."
+        return baseText + "\n\nDebug builds request write permissions for test data generation."
         #else
-        return "This app only reads health data. It never writes to HealthKit."
+        return baseText
         #endif
     }
 

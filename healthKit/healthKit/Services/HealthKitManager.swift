@@ -8,11 +8,23 @@ final class HealthKitManager: ObservableObject {
 
     let healthStore = HKHealthStore()
 
-    @Published var isAuthorized = false
+    @Published var isAuthorized = false {
+        didSet {
+            // Persist authorization state
+            UserDefaults.standard.set(isAuthorized, forKey: "healthkit_authorization_requested")
+        }
+    }
 
     /// The sync coordinator to trigger when observer queries fire.
     /// Set by the AppDelegate after both objects are initialized.
     var syncCoordinator: SyncCoordinator?
+    
+    init() {
+        // Restore authorization state from previous session
+        // Note: This only indicates we've REQUESTED auth before, not that it was granted
+        // (HealthKit doesn't allow checking actual permission status for privacy)
+        self.isAuthorized = UserDefaults.standard.bool(forKey: "healthkit_authorization_requested")
+    }
 
     /// Request read-only authorization for all configured HealthKit types.
     /// Note: HealthKit does not reveal which types the user actually granted — `success`
