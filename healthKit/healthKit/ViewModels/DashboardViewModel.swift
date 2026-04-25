@@ -31,17 +31,6 @@ final class DashboardViewModel: ObservableObject {
         checkEndpointConfiguration()
     }
     
-    /// Convenience initializer that gets dependencies from AppDelegate
-    convenience init() {
-        guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else {
-            fatalError("AppDelegate not available - ensure the app is properly initialized")
-        }
-        self.init(
-            healthKitManager: appDelegate.healthKitManager,
-            syncCoordinator: appDelegate.syncCoordinator
-        )
-    }
-    
     private func observeSyncCoordinator() {
         // Observe sync state changes from the coordinator
         syncCoordinator.$isSyncing

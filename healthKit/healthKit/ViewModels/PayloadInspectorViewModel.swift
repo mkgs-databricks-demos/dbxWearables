@@ -16,14 +16,6 @@ final class PayloadInspectorViewModel: ObservableObject {
     init(syncLedger: SyncLedger) {
         self.syncLedger = syncLedger
     }
-    
-    /// Convenience initializer that gets dependencies from AppDelegate
-    convenience init() {
-        guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else {
-            fatalError("AppDelegate not available - ensure the app is properly initialized")
-        }
-        self.init(syncLedger: appDelegate.syncCoordinator.syncLedger)
-    }
 
     func loadPayload() async {
         Log.ui.info("PayloadInspectorViewModel: loadPayload() called for type: \(self.selectedRecordType)")

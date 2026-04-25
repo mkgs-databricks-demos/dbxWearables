@@ -3,56 +3,69 @@ import SwiftUI
 /// Tab 3: Inspect the last-sent NDJSON payload per record type.
 /// Terminal-aesthetic dark viewer for demo verification.
 struct PayloadInspectorView: View {
-    @StateObject private var viewModel = PayloadInspectorViewModel()
+    @EnvironmentObject private var syncCoordinator: SyncCoordinator
+    @State private var viewModel: PayloadInspectorViewModel?
     @State private var showCopiedToast = false
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                categoryPicker
-                    .padding()
-
-                if let payload = viewModel.lastPayload {
-                    metadataBanner(payload)
-                        .padding(.horizontal)
-                        .padding(.bottom, 8)
-                    ndjsonViewer
-                } else {
-                    emptyState
-                }
-            }
-            .background(DBXColors.dbxLightGray)
-            .navigationTitle("Payloads")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        viewModel.copyPayloadToClipboard()
-                        showCopiedToast = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                            showCopiedToast = false
-                        }
-                    } label: {
-                        Image(systemName: "doc.on.doc")
+            if let viewModel {
+                payloadInspectorContent(viewModel: viewModel)
+            } else {
+                ProgressView()
+                    .onAppear {
+                        self.viewModel = PayloadInspectorViewModel(syncLedger: syncCoordinator.syncLedger)
                     }
-                    .disabled(viewModel.lastPayload == nil)
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private func payloadInspectorContent(viewModel: PayloadInspectorViewModel) -> some View {
+        VStack(spacing: 0) {
+            categoryPicker(viewModel: viewModel)
+                .padding()
+
+            if let payload = viewModel.lastPayload {
+                metadataBanner(payload)
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
+                ndjsonViewer(viewModel: viewModel)
+            } else {
+                emptyState
+            }
+        }
+        .background(DBXColors.dbxLightGray)
+        .navigationTitle("Payloads")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    viewModel.copyPayloadToClipboard()
+                    showCopiedToast = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        showCopiedToast = false
+                    }
+                } label: {
+                    Image(systemName: "doc.on.doc")
                 }
+                .disabled(viewModel.lastPayload == nil)
             }
-            .overlay(alignment: .top) {
-                if showCopiedToast {
-                    copiedToast
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
+        }
+        .overlay(alignment: .top) {
+            if showCopiedToast {
+                copiedToast
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
-            .task {
-                await viewModel.loadPayload()
-            }
+        }
+        .task {
+            await viewModel.loadPayload()
         }
     }
 
     // MARK: - Category Picker
 
-    private var categoryPicker: some View {
+    private func categoryPicker(viewModel: PayloadInspectorViewModel) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(PayloadInspectorViewModel.recordTypes, id: \.self) { type in
@@ -121,7 +134,7 @@ struct PayloadInspectorView: View {
 
     // MARK: - NDJSON Viewer
 
-    private var ndjsonViewer: some View {
+    private func ndjsonViewer(viewModel: PayloadInspectorViewModel) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(viewModel.parsedLines) { line in

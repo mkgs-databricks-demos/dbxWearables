@@ -9,6 +9,8 @@ struct dbxWearablesApp: App {
     var body: some Scene {
         WindowGroup {
             MainTabView()
+                .environmentObject(appDelegate.healthKitManager)
+                .environmentObject(appDelegate.syncCoordinator)
                 .onAppear {
                     if !hasCompletedOnboarding {
                         showOnboarding = true
@@ -17,7 +19,11 @@ struct dbxWearablesApp: App {
                 .sheet(isPresented: $showOnboarding, onDismiss: {
                     hasCompletedOnboarding = true
                 }) {
-                    OnboardingView(isPresented: $showOnboarding)
+                    OnboardingView(
+                        isPresented: $showOnboarding,
+                        healthKitManager: appDelegate.healthKitManager
+                    )
+                    .environmentObject(appDelegate.healthKitManager)
                 }
         }
     }

@@ -234,7 +234,7 @@ final class APIServiceTests: XCTestCase {
         let json = #"{"status":"ok"}"#
 
         MockURLProtocol.requestHandler = { request in
-            capturedBody = request.httpBody
+            capturedBody = Self.readBody(from: request)
             let response = HTTPURLResponse(
                 url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil
             )!
@@ -260,6 +260,26 @@ final class APIServiceTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// URLSession converts `httpBody` to `httpBodyStream` when routing through a
+    /// custom `URLProtocol`, so reading `request.httpBody` returns nil. Drain the
+    /// stream instead.
+    static func readBody(from request: URLRequest) -> Data {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return Data() }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        let bufferSize = 4096
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+        while stream.hasBytesAvailable {
+            let read = stream.read(buffer, maxLength: bufferSize)
+            if read <= 0 { break }
+            data.append(buffer, count: read)
+        }
+        return data
+    }
 
     private func makeSample(uuid: String = "A1B2C3D4-0001-0000-0000-000000000000") -> HealthSample {
         HealthSample(

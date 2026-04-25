@@ -18,14 +18,6 @@ final class PermissionsViewModel: ObservableObject {
         observeHealthKitManager()
     }
     
-    /// Convenience initializer that gets dependencies from AppDelegate
-    convenience init() {
-        guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else {
-            fatalError("AppDelegate not available - ensure the app is properly initialized")
-        }
-        self.init(healthKitManager: appDelegate.healthKitManager)
-    }
-    
     private func observeHealthKitManager() {
         // Observe the authorization state from HealthKitManager
         healthKitManager.$isAuthorized

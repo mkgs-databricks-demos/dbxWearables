@@ -2,28 +2,41 @@ import SwiftUI
 
 /// Tab 2: Per-category breakdown of data sent to Databricks.
 struct DataExplorerView: View {
-    @StateObject private var viewModel = DataExplorerViewModel()
+    @EnvironmentObject private var syncCoordinator: SyncCoordinator
+    @State private var viewModel: DataExplorerViewModel?
 
     var body: some View {
         NavigationStack {
-            List {
-                ForEach(viewModel.categorySummaries) { summary in
-                    NavigationLink {
-                        CategoryDetailView(
-                            summary: summary,
-                            breakdown: viewModel.breakdown(for: summary.recordType),
-                            stats: viewModel.stats
-                        )
-                    } label: {
-                        categoryRow(summary)
+            if let viewModel {
+                dataExplorerContent(viewModel: viewModel)
+            } else {
+                ProgressView()
+                    .onAppear {
+                        self.viewModel = DataExplorerViewModel(syncLedger: syncCoordinator.syncLedger)
                     }
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private func dataExplorerContent(viewModel: DataExplorerViewModel) -> some View {
+        List {
+            ForEach(viewModel.categorySummaries) { summary in
+                NavigationLink {
+                    CategoryDetailView(
+                        summary: summary,
+                        breakdown: viewModel.breakdown(for: summary.recordType),
+                        stats: viewModel.stats
+                    )
+                } label: {
+                    categoryRow(summary)
                 }
             }
-            .navigationTitle("Data Explorer")
-            .navigationBarTitleDisplayMode(.inline)
-            .task {
-                await viewModel.loadStats()
-            }
+        }
+        .navigationTitle("Data Explorer")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await viewModel.loadStats()
         }
     }
 

@@ -2,7 +2,8 @@ import SwiftUI
 
 /// Tab 4: Explains the app's purpose, ZeroBus, data flow, HealthKit types, and settings.
 struct AboutView: View {
-    @StateObject private var permissionsViewModel = PermissionsViewModel()
+    @EnvironmentObject private var healthKitManager: HealthKitManager
+    @State private var permissionsViewModel: PermissionsViewModel?
     @State private var showOnboarding = false
     #if DEBUG
     @State private var showSPNCredentials = false
@@ -32,8 +33,17 @@ struct AboutView: View {
             .background(DBXColors.dbxLightGray)
             .navigationTitle("About")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                if permissionsViewModel == nil {
+                    permissionsViewModel = PermissionsViewModel(healthKitManager: healthKitManager)
+                }
+            }
             .sheet(isPresented: $showOnboarding) {
-                OnboardingView(isPresented: $showOnboarding)
+                OnboardingView(
+                    isPresented: $showOnboarding,
+                    healthKitManager: healthKitManager
+                )
+                .environmentObject(healthKitManager)
             }
             #if DEBUG
             .sheet(isPresented: $showSPNCredentials) {
@@ -202,16 +212,18 @@ struct AboutView: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader("HealthKit Permissions")
 
+            let isAuthorized = permissionsViewModel?.isAuthorized ?? false
+
             HStack {
-                Image(systemName: permissionsViewModel.isAuthorized ? "checkmark.shield.fill" : "exclamationmark.shield")
-                    .foregroundStyle(permissionsViewModel.isAuthorized ? DBXColors.dbxGreen : DBXColors.dbxYellow)
-                Text(permissionsViewModel.isAuthorized ? "Access granted" : "Access not yet granted")
+                Image(systemName: isAuthorized ? "checkmark.shield.fill" : "exclamationmark.shield")
+                    .foregroundStyle(isAuthorized ? DBXColors.dbxGreen : DBXColors.dbxYellow)
+                Text(isAuthorized ? "Access granted" : "Access not yet granted")
                     .font(.subheadline)
             }
 
-            if !permissionsViewModel.isAuthorized {
+            if !isAuthorized {
                 Button("Request Access") {
-                    Task { await permissionsViewModel.requestAuthorization() }
+                    Task { await permissionsViewModel?.requestAuthorization() }
                 }
                 .buttonStyle(DBXSecondaryButtonStyle())
             }

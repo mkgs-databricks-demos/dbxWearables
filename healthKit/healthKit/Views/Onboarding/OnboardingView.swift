@@ -4,10 +4,18 @@ import SwiftUI
 /// Can be re-shown from the About tab.
 struct OnboardingView: View {
     @Binding var isPresented: Bool
-    @StateObject private var permissionsViewModel = PermissionsViewModel()
+    @EnvironmentObject private var healthKitManager: HealthKitManager
+    @StateObject private var permissionsViewModel: PermissionsViewModel
     @State private var currentPage = 0
 
     private let totalPages = 4
+
+    init(isPresented: Binding<Bool>, healthKitManager: HealthKitManager) {
+        self._isPresented = isPresented
+        self._permissionsViewModel = StateObject(
+            wrappedValue: PermissionsViewModel(healthKitManager: healthKitManager)
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
