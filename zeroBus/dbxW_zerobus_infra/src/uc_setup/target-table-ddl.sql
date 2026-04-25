@@ -53,7 +53,7 @@ TBLPROPERTIES (
   'delta.enableChangeDataFeed' = 'true',
   'delta.enableDeletionVectors' = 'true',
   'delta.enableRowTracking' = 'true',
-  'delta.enableTypeWidening' = 'true',
+  -- 'delta.enableTypeWidening' = 'true',
   'delta.enableVariantShredding' = 'true',
   'quality' = 'bronze',
   'pipeline' = 'dbxw_zerobus',
