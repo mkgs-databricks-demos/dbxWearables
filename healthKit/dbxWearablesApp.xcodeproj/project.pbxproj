@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		0132082917F3C23F9488B35C /* SyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2E99C9CE80A4845CB68B8AF /* SyncCoordinator.swift */; };
 		0581EA58D018B1610C880462 /* SleepMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC70B35EDFDC28BEE0453D4 /* SleepMapper.swift */; };
+		07DFD223D570919BFDEAA8C4 /* AuthServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89C4F22A64DD1E11ED6AB97D /* AuthServiceTests.swift */; };
 		0922AD0FAC10816B5ED9D105 /* DataExplorerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 113EF83D5DD46BE449133523 /* DataExplorerViewModel.swift */; };
 		1466E2F84C1BA8E3A0E488C5 /* HealthKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9311559C832439DB413932EB /* HealthKitManager.swift */; };
 		15305721965B9DC290FEBBD4 /* NDJSONSerializer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43939CCE6A5709EA09002379 /* NDJSONSerializer.swift */; };
@@ -46,6 +47,8 @@
 		9BA554890E77D12912991626 /* WorkoutRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0182D1D387E5E112097EC48 /* WorkoutRecord.swift */; };
 		9DFC0BC9AE087939B9D1DA36 /* HealthKitConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FA0E004A7DC1F76DDD5E912 /* HealthKitConfiguration.swift */; };
 		9F7B8A20F98F58FA629FE69F /* SyncRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 183B7B186EF23731B9CA9104 /* SyncRecord.swift */; };
+		A2CE00199C94EBEC587CDD5C /* MockAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 113902C3534F838C3958E426 /* MockAuthService.swift */; };
+		AEC1FBB26180060D2BB757C4 /* MockURLProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BCA9780775DB0D5356CEE19 /* MockURLProtocol.swift */; };
 		B0004CF6BD196732DFB4922B /* SyncStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADE09F3821FB596BF1F710CF /* SyncStats.swift */; };
 		B5760E25AFF54874AA86E969 /* PermissionsFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 409C486DA8C8591D9C401C24 /* PermissionsFlowUITests.swift */; };
 		BE876EEBB3884B02D9FBF541 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8871DEFC606E439AFE61A978 /* DashboardView.swift */; };
@@ -60,6 +63,7 @@
 		E516E65CA22DC0DDF5D045A1 /* ActivitySummaryMapperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33943365A543BCCCBAC4C468 /* ActivitySummaryMapperTests.swift */; };
 		E68CF07141C8F8D0329EC559 /* DBXButtonStyles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AE21853ED13BFC4CCB85E97 /* DBXButtonStyles.swift */; };
 		EC099C9843810E4C44128575 /* CategoryStatCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB74526950DA5EA76370447D /* CategoryStatCard.swift */; };
+		F0F2F8E2B029957787E6EF50 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF5B3CCCDE16F7593C0EF831 /* AuthService.swift */; };
 		F1A23A3279264C7869B16C8B /* ActivitySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C6FB98AEA775F7FC170C0EF /* ActivitySummary.swift */; };
 		F4D0E4A168D3F4C7EF63ABB7 /* APIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01B70B15249CB58DCDA27AF /* APIService.swift */; };
 		F8EC68682DB640DCB8FB539B /* NDJSONSerializerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C97F568D0D1D9A7CF94AAD6 /* NDJSONSerializerTests.swift */; };
@@ -87,6 +91,7 @@
 /* Begin PBXFileReference section */
 		070766A51CBAC04E37478A81 /* Logger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
 		10FC9C995E8483DC5F84D7D4 /* DataExplorerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataExplorerView.swift; sourceTree = "<group>"; };
+		113902C3534F838C3958E426 /* MockAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockAuthService.swift; sourceTree = "<group>"; };
 		113EF83D5DD46BE449133523 /* DataExplorerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataExplorerViewModel.swift; sourceTree = "<group>"; };
 		183B7B186EF23731B9CA9104 /* SyncRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncRecord.swift; sourceTree = "<group>"; };
 		18A9BB0751345151C3089087 /* SyncStatusCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStatusCard.swift; sourceTree = "<group>"; };
@@ -117,11 +122,13 @@
 		686F5743FFD851A9C3B7D92A /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
 		6B1C4A6405D1575322DB5C16 /* MockAPIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockAPIService.swift; sourceTree = "<group>"; };
 		722CC20040A3E3F85B0E40EC /* DeviceIdentifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentifier.swift; sourceTree = "<group>"; };
+		7BCA9780775DB0D5356CEE19 /* MockURLProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockURLProtocol.swift; sourceTree = "<group>"; };
 		7FA0E004A7DC1F76DDD5E912 /* HealthKitConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitConfiguration.swift; sourceTree = "<group>"; };
 		8706EDAC5ABF89B76A25B86C /* healthKitTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = healthKitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		87D86A2DD23DA0D41CBF5E4C /* PermissionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsView.swift; sourceTree = "<group>"; };
 		880FCBB261A8729153A8D0A3 /* SyncLedger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncLedger.swift; sourceTree = "<group>"; };
 		8871DEFC606E439AFE61A978 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		89C4F22A64DD1E11ED6AB97D /* AuthServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthServiceTests.swift; sourceTree = "<group>"; };
 		8BC8A82CDFA8487C8B537F57 /* HKQuantityType+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HKQuantityType+Extensions.swift"; sourceTree = "<group>"; };
 		8C6FB98AEA775F7FC170C0EF /* ActivitySummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivitySummary.swift; sourceTree = "<group>"; };
 		9311559C832439DB413932EB /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitManager.swift; sourceTree = "<group>"; };
@@ -136,6 +143,7 @@
 		B548542332EFC8C1AB88F977 /* PayloadInspectorViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadInspectorViewModel.swift; sourceTree = "<group>"; };
 		BDC70B35EDFDC28BEE0453D4 /* SleepMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepMapper.swift; sourceTree = "<group>"; };
 		BED48220767B7DC6FE34C4CF /* ActivitySummaryMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivitySummaryMapper.swift; sourceTree = "<group>"; };
+		BF5B3CCCDE16F7593C0EF831 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		C8D6936BA3B368C036604571 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		D81665B1BF0B72B2D44A7074 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		DBF2E89473E3121C279F1A1A /* DeletionRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeletionRecord.swift; sourceTree = "<group>"; };
@@ -260,6 +268,7 @@
 			children = (
 				BED48220767B7DC6FE34C4CF /* ActivitySummaryMapper.swift */,
 				F01B70B15249CB58DCDA27AF /* APIService.swift */,
+				BF5B3CCCDE16F7593C0EF831 /* AuthService.swift */,
 				9311559C832439DB413932EB /* HealthKitManager.swift */,
 				A857A58F181C55BD46FD2DE5 /* HealthKitQueryService.swift */,
 				5FAC0042619024928D66BDF8 /* HealthSampleMapper.swift */,
@@ -293,6 +302,8 @@
 			isa = PBXGroup;
 			children = (
 				6B1C4A6405D1575322DB5C16 /* MockAPIService.swift */,
+				113902C3534F838C3958E426 /* MockAuthService.swift */,
+				7BCA9780775DB0D5356CEE19 /* MockURLProtocol.swift */,
 			);
 			path = Mocks;
 			sourceTree = "<group>";
@@ -377,6 +388,7 @@
 			children = (
 				33943365A543BCCCBAC4C468 /* ActivitySummaryMapperTests.swift */,
 				30E02528017DBCF3A839E700 /* APIServiceTests.swift */,
+				89C4F22A64DD1E11ED6AB97D /* AuthServiceTests.swift */,
 				2F393872EFF0517F3F8E6CBD /* HealthSampleMapperTests.swift */,
 				2C97F568D0D1D9A7CF94AAD6 /* NDJSONSerializerTests.swift */,
 				98E44EDA0C1626F60C6FEFB4 /* SleepMapperTests.swift */,
@@ -540,9 +552,12 @@
 			files = (
 				1DDA743661936E742C60FF97 /* APIServiceTests.swift in Sources */,
 				E516E65CA22DC0DDF5D045A1 /* ActivitySummaryMapperTests.swift in Sources */,
+				07DFD223D570919BFDEAA8C4 /* AuthServiceTests.swift in Sources */,
 				68E9EF5CDD0DD4F5A6FF99ED /* DeletionRecordTests.swift in Sources */,
 				D182BF610BDDDA3C40E8725B /* HealthSampleMapperTests.swift in Sources */,
 				382CDE72A1AD069DCF876E60 /* MockAPIService.swift in Sources */,
+				A2CE00199C94EBEC587CDD5C /* MockAuthService.swift in Sources */,
+				AEC1FBB26180060D2BB757C4 /* MockURLProtocol.swift in Sources */,
 				F8EC68682DB640DCB8FB539B /* NDJSONSerializerTests.swift in Sources */,
 				8B1B085F1858B53C713CAA60 /* SleepMapperTests.swift in Sources */,
 				3E73281F7C78B769CEEF7C4F /* WorkoutMapperTests.swift in Sources */,
@@ -568,6 +583,7 @@
 				F1A23A3279264C7869B16C8B /* ActivitySummary.swift in Sources */,
 				51E73F4412AE860673321844 /* ActivitySummaryMapper.swift in Sources */,
 				1C508F865AF230D0BB23AE4F /* AppDelegate.swift in Sources */,
+				F0F2F8E2B029957787E6EF50 /* AuthService.swift in Sources */,
 				C50695A5489DBE0D3EACA311 /* CategoryDetailView.swift in Sources */,
 				EC099C9843810E4C44128575 /* CategoryStatCard.swift in Sources */,
 				E68CF07141C8F8D0329EC559 /* DBXButtonStyles.swift in Sources */,

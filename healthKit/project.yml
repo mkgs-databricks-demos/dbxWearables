@@ -47,6 +47,9 @@ targets:
         - variable: DBX_API_BASE_URL
           value: "https://dev-dbxw-0bus-ingest-7474657291520070.aws.databricksapps.com"
           isEnabled: true
+        - variable: DBX_WORKSPACE_HOST
+          value: "https://fevm-hls-fde.cloud.databricks.com"
+          isEnabled: true
       testTargets:
         - healthKitTests
         - healthKitUITests

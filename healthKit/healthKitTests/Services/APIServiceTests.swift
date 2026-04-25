@@ -1,37 +1,6 @@
 import XCTest
 @testable import dbxWearablesApp
 
-// MARK: - Mock URL Protocol
-
-/// Intercepts all URL requests made through the session, returning controlled responses.
-private final class MockURLProtocol: URLProtocol {
-
-    /// Set this before each test to control the response for intercepted requests.
-    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
-
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        guard let handler = Self.requestHandler else {
-            client?.urlProtocol(self, didFailWithError: URLError(.unknown))
-            return
-        }
-        do {
-            let (response, data) = try handler(request)
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: data)
-            client?.urlProtocolDidFinishLoading(self)
-        } catch {
-            client?.urlProtocol(self, didFailWithError: error)
-        }
-    }
-
-    override func stopLoading() {}
-}
-
-// MARK: - Tests
-
 final class APIServiceTests: XCTestCase {
 
     private var sut: APIService!

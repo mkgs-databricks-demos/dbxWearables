@@ -13,6 +13,25 @@ enum APIConfiguration {
         return url
     }
 
+    /// Workspace hostname used for the OAuth token endpoint (e.g., "https://<workspace>.cloud.databricks.com").
+    /// This is distinct from `baseURL` because Databricks Apps run on `*.databricksapps.com` while the
+    /// workspace OIDC endpoint lives on the workspace host.
+    static var workspaceHost: URL {
+        guard let urlString = ProcessInfo.processInfo.environment["DBX_WORKSPACE_HOST"],
+              let url = URL(string: urlString) else {
+            fatalError("DBX_WORKSPACE_HOST environment variable is not set or is invalid.")
+        }
+        return url
+    }
+
+    /// OAuth 2.0 token endpoint for the Databricks workspace (`POST /oidc/v1/token`).
+    static var workspaceTokenEndpoint: URL {
+        workspaceHost.appendingPathComponent("oidc/v1/token")
+    }
+
+    /// OAuth scope requested for the M2M client_credentials flow.
+    static let oauthScope = "all-apis"
+
     /// Endpoint path for posting HealthKit payloads.
     static let ingestPath = "/api/v1/healthkit/ingest"
 
