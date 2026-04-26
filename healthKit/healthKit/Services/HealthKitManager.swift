@@ -8,22 +8,47 @@ final class HealthKitManager: ObservableObject {
 
     let healthStore = HKHealthStore()
 
-    @Published var isAuthorized = false
+    @Published var isAuthorized = false {
+        didSet {
+            // Persist authorization state
+            UserDefaults.standard.set(isAuthorized, forKey: "healthkit_authorization_requested")
+        }
+    }
 
     /// The sync coordinator to trigger when observer queries fire.
     /// Set by the AppDelegate after both objects are initialized.
     var syncCoordinator: SyncCoordinator?
+    
+    init() {
+        // Restore authorization state from previous session
+        // Note: This only indicates we've REQUESTED auth before, not that it was granted
+        // (HealthKit doesn't allow checking actual permission status for privacy)
+        self.isAuthorized = UserDefaults.standard.bool(forKey: "healthkit_authorization_requested")
+    }
 
     /// Request read-only authorization for all configured HealthKit types.
     /// Note: HealthKit does not reveal which types the user actually granted — `success`
     /// only indicates the authorization dialog was presented.
+    ///
+    /// In DEBUG builds, also requests write permission to allow test data generation.
     func requestAuthorization() async throws {
         guard HKHealthStore.isHealthDataAvailable() else { return }
 
+        #if DEBUG
+        // Request write permissions for test data generation in debug builds.
+        // `allWritableTypes` excludes Apple-managed types (exercise/stand time, stand hour,
+        // activity summaries) which third-party apps cannot write to.
+        try await healthStore.requestAuthorization(
+            toShare: HealthKitConfiguration.allWritableTypes,
+            read: HealthKitConfiguration.allReadTypes
+        )
+        #else
         try await healthStore.requestAuthorization(
             toShare: [],
             read: HealthKitConfiguration.allReadTypes
         )
+        #endif
+        
         await MainActor.run { isAuthorized = true }
     }
 

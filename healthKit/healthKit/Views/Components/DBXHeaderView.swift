@@ -1,18 +1,19 @@
 import SwiftUI
 
 /// Reusable Databricks-branded header with wordmark, app name, and tagline.
+/// Matches the Dashboard hero header style with left alignment and gradient.
 struct DBXHeaderView: View {
     var showVersion: Bool = false
 
     var body: some View {
-        VStack(spacing: 8) {
-            DatabricksWordmark(size: 18)
+        VStack(alignment: .leading, spacing: 8) {
+            DatabricksWordmark(size: 16)
 
             Text("dbxWearables")
-                .font(.system(size: 24, weight: .bold))
+                .font(DBXTypography.heroTitle)
                 .foregroundStyle(.white)
 
-            Text("Apple HealthKit \u{2192} Databricks ZeroBus")
+            Text("HealthKit \u{2192} ZeroBus")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.8))
 
@@ -20,11 +21,12 @@ struct DBXHeaderView: View {
                 Text("v\(appVersion)")
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.5))
+                    .padding(.top, 2)
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 28)
-        .background(DBXGradients.darkBackground)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+        .background(DBXGradients.heroHeader)
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 

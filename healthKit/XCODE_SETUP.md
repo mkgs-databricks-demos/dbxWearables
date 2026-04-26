@@ -141,20 +141,25 @@ com.apple.developer.healthkit.background-delivery = true
 
 This matches the `UIBackgroundModes` entry in `Info.plist` and is required by `AppDelegate.swift` which calls `healthKitManager.registerBackgroundDelivery()` at launch.
 
-## 7. Set the Environment Variable
+## 7. Pick a Scheme (per Bundle Target)
 
-The app requires the `DBX_API_BASE_URL` environment variable. Without it, `APIConfiguration.swift` will call `fatalError` on launch.
+`project.yml` defines one scheme per Databricks Asset Bundle target:
 
-1. **Product > Scheme > Edit Scheme** (or ⌘<)
-2. Select **Run** in the left sidebar
-3. Go to the **Arguments** tab
-4. Under **Environment Variables**, click **+** and add:
+| Scheme | Points at |
+|--------|-----------|
+| `dbxWearablesApp-dev` | Dev gateway + workspace (current default) |
+| `dbxWearablesApp-staging` | Staging — URLs are `TODO`, fill in when staging is deployed |
+| `dbxWearablesApp-prod` | Prod — URLs are `TODO`, fill in when prod is deployed |
 
-   | Name | Value |
-   |------|-------|
-   | `DBX_API_BASE_URL` | Your Databricks app URL, e.g. `https://<workspace>.databricks.com/apps/<app-name>` |
+Each scheme bakes in the matching `DBX_API_BASE_URL` and `DBX_WORKSPACE_HOST` env vars. `APIConfiguration.swift` calls `fatalError` if either is missing at launch, so you must select a scheme with the right env vars set.
 
-> **Tests:** `APIServiceTests.swift` sets this variable programmatically via `setenv()`, so unit tests run without manual configuration.
+**To switch environments:**
+1. Use the scheme picker in the Xcode toolbar, or pass `-scheme dbxWearablesApp-<env>` to `xcodebuild`.
+2. To add a new environment: edit `project.yml`, add a scheme block, run `xcodegen generate`.
+
+> **Tests:** `APIServiceTests.swift` and `AuthServiceTests.swift` set their env vars programmatically via `setenv()`, so unit tests run regardless of which scheme is active.
+
+> **SPN credentials:** Client ID + secret are *not* baked into schemes. Paste them via **About → Service Principal Credentials** (debug builds only). They persist in the iOS Keychain.
 
 ## 8. Code Signing
 
@@ -200,7 +205,7 @@ For meaningful HealthKit testing, use a physical device.
 | Problem | Cause | Fix |
 |---------|-------|-----|
 | `No such module 'dbxWearablesApp'` in test files | Product Module Name mismatch | Build Settings > Packaging > Product Module Name must be exactly `dbxWearablesApp` |
-| `fatalError: DBX_API_BASE_URL environment variable is not set` | Missing env var | Set `DBX_API_BASE_URL` in the scheme's Run configuration (see [Step 7](#7-set-the-environment-variable)) |
+| `fatalError: DBX_API_BASE_URL environment variable is not set` | Wrong scheme selected (or env var missing) | Select `dbxWearablesApp-dev` (or another configured scheme) — see [Step 7](#7-pick-a-scheme-per-bundle-target) |
 | Code signing / entitlement errors on device | HealthKit requires paid account | Ensure HealthKit capability is added via Signing & Capabilities and you have a paid Apple Developer account |
 | Duplicate `@main` entry point | Xcode's auto-generated App file still present | Delete all auto-generated Swift files (see [Step 2](#2-delete-auto-generated-files)) |
 | No app icon | None configured yet | Expected — no `AppIcon` asset set exists. Add one to `Resources/Assets.xcassets` when ready |

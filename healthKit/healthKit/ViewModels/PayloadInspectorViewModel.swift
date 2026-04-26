@@ -1,4 +1,5 @@
 import UIKit
+import OSLog
 
 /// Drives the Payload Inspector tab — shows the last-sent NDJSON payload per record type.
 @MainActor
@@ -6,18 +7,37 @@ final class PayloadInspectorViewModel: ObservableObject {
 
     static let recordTypes = ["samples", "workouts", "sleep", "activity_summaries", "deletes"]
 
+    var syncLedger: SyncLedger
+
     @Published var selectedRecordType = "samples"
     @Published var lastPayload: SyncRecord?
     @Published var parsedLines: [PayloadLine] = []
+    @Published var availableTypes: Set<String> = []
 
-    private var appDelegate: AppDelegate {
-        UIApplication.shared.delegate as! AppDelegate
+    init(syncLedger: SyncLedger) {
+        self.syncLedger = syncLedger
     }
 
     func loadPayload() async {
-        let ledger = appDelegate.syncCoordinator.syncLedger
-        lastPayload = await ledger.getLastPayload(for: selectedRecordType)
+        Log.ui.info("PayloadInspectorViewModel: loadPayload() called for type: \(self.selectedRecordType)")
+        
+        lastPayload = await syncLedger.getLastPayload(for: selectedRecordType)
         parsedLines = parseNDJSON(lastPayload?.ndjsonPayload)
+        
+        // Update available types by checking which ones have payloads
+        var types: Set<String> = []
+        for recordType in Self.recordTypes {
+            if await syncLedger.getLastPayload(for: recordType) != nil {
+                types.insert(recordType)
+            }
+        }
+        self.availableTypes = types
+        
+        Log.ui.info("PayloadInspectorViewModel: Loaded \(self.parsedLines.count) lines, available types: \(types)")
+    }
+    
+    func hasPayload(for type: String) -> Bool {
+        availableTypes.contains(type)
     }
 
     func copyPayloadToClipboard() {
