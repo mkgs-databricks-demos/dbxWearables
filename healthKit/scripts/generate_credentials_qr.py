@@ -33,9 +33,12 @@ def generate_qr_code(client_id: str, client_secret: str, output_file: str = "cre
     
     # Convert to JSON string
     json_string = json.dumps(credentials, separators=(',', ':'))
-    
-    print(f"📋 Credentials JSON ({len(json_string)} bytes):")
-    print(json.dumps(credentials, indent=2))
+
+    # Print a redacted preview only — never log the real client secret to
+    # stdout. The QR encoding below still uses the full credentials.
+    redacted = {**credentials, "client_secret": "***redacted***"}
+    print(f"📋 Credentials JSON ({len(json_string)} bytes, secret redacted in preview):")
+    print(json.dumps(redacted, indent=2))
     print()
     
     # Generate QR code
