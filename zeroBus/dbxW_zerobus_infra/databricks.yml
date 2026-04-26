@@ -77,6 +77,18 @@ variables:
       it via ZEROBUS_STREAM_POOL_SIZE env var. The app defaults to 4 if unset.
     default: "4"
 
+  # ── Lakebase Project ────────────────────────────────────────────────
+  #
+  # Target-specific Lakebase project IDs. When two targets share the
+  # same workspace (dev + hls_fde), each must have a distinct project
+  # to avoid collisions. The resource in wearables.lakebase.yml
+  # references ${var.lakebase_project_id}.
+  lakebase_project_id:
+    description: >
+      Lakebase project ID (unique per target). Must be distinct when
+      multiple targets deploy to the same workspace.
+    default: dbxw-zerobus-wearables
+
   # ── JWT Authentication (Phase 1) ────────────────────────────────────
   #
   # Auth secrets auto-provisioned by the UC setup job. The companion app
@@ -208,6 +220,7 @@ targets:
       serverless_environment_version: "5"
       client_id_dbs_key: client_id_${var.schema}
       client_secret_dbs_key: client_secret_${var.schema}
+      lakebase_project_id: dbxw-zerobus-wearables-hls-fde
     permissions:
       - user_name: matthew.giglia@databricks.com
         level: CAN_MANAGE

@@ -211,6 +211,7 @@ targets:
       postgres_branch: projects/dbxw-zerobus-wearables/branches/production
       postgres_database: projects/dbxw-zerobus-wearables/branches/production/databases/db-0k31-aj7nvq8pgr
       zerobus_stream_pool_size: "1"
+      ios_bootstrap_spn_id: 5eea8815-294a-40b3-9612-b86782d8824d
 
 
   # ── hls_fde (production — same workspace as dev) ────────────────────────

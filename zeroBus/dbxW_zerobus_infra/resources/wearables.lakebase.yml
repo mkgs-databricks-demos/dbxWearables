@@ -53,7 +53,7 @@ resources:
   # -------------------------------------------------------------------------
   postgres_projects:
     wearables_lakebase:
-      project_id: dbxw-zerobus-wearables
+      project_id: ${var.lakebase_project_id}
       display_name: dbxWearables ZeroBus — Lakebase
       pg_version: 17
 

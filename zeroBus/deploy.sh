@@ -348,7 +348,7 @@ check_lakebase_status() {
 
   # Verify the project is accessible
   local project_json
-  project_json=$(databricks postgres get-project "${project_id}" --output json 2>&1) || {
+  project_json=$(databricks postgres get-project "projects/${project_id}" --output json 2>/dev/null) || {
     warn "Lakebase project '${project_id}' not found or not accessible."
     warn "If the project was just created, it may still be initializing."
     return 0
@@ -357,7 +357,7 @@ check_lakebase_status() {
 
   # List endpoints on the production branch
   local endpoints_json
-  endpoints_json=$(databricks postgres list-endpoints "projects/${project_id}/branches/production" --output json 2>&1) || {
+  endpoints_json=$(databricks postgres list-endpoints "projects/${project_id}/branches/production" --output json 2>/dev/null) || {
     warn "Could not list endpoints for project '${project_id}' branch 'production'."
     warn "The branch or endpoint may still be initializing."
     return 0
