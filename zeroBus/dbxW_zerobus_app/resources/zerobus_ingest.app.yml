@@ -259,6 +259,7 @@ targets:
               level: CAN_MANAGE
             - group_name: users
               level: CAN_USE
+              
 
   hls_fde:
     resources:
