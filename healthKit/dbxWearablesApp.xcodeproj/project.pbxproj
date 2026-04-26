@@ -63,6 +63,11 @@
 		CF7378DFC6AE14E2826023D5 /* NDJSONLineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E9E05C3D2BBFD9326BD62AB /* NDJSONLineView.swift */; };
 		D182BF610BDDDA3C40E8725B /* HealthSampleMapperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F393872EFF0517F3F8E6CBD /* HealthSampleMapperTests.swift */; };
 		D40CD3546532B7D23780375F /* TestResultsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88BE3D9A47EB88F6A404CD83 /* TestResultsView.swift */; };
+		D601FF092F9DCF7E0085B0A5 /* CredentialsConfigView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D601FF082F9DCF7E0085B0A5 /* CredentialsConfigView.swift */; };
+		D601FF0B2F9DD09C0085B0A5 /* QRCodeScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D601FF0A2F9DD09C0085B0A5 /* QRCodeScannerView.swift */; };
+		D601FF0D2F9DD0CC0085B0A5 /* Scriptsgenerate_credentials_qr.py in Resources */ = {isa = PBXBuildFile; fileRef = D601FF0C2F9DD0CC0085B0A5 /* Scriptsgenerate_credentials_qr.py */; };
+		D601FF0F2F9DD0EC0085B0A5 /* ScriptsREADME.md in Resources */ = {isa = PBXBuildFile; fileRef = D601FF0E2F9DD0EC0085B0A5 /* ScriptsREADME.md */; };
+		D601FF112F9DD0FD0085B0A5 /* CAMERA_PERMISSION.md in Resources */ = {isa = PBXBuildFile; fileRef = D601FF102F9DD0FD0085B0A5 /* CAMERA_PERMISSION.md */; };
 		D75BDC9E9438F2219BEE4F29 /* HealthKitQueryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A857A58F181C55BD46FD2DE5 /* HealthKitQueryService.swift */; };
 		DAFEE242A161036772BD847E /* PayloadInspectorViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B548542332EFC8C1AB88F977 /* PayloadInspectorViewModel.swift */; };
 		DE3B6EF6EE222D1333DAAC1A /* APIResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21BDA56D69A95F4AC2CC4B4B /* APIResponse.swift */; };
@@ -160,6 +165,11 @@
 		BED48220767B7DC6FE34C4CF /* ActivitySummaryMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivitySummaryMapper.swift; sourceTree = "<group>"; };
 		BF5B3CCCDE16F7593C0EF831 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		C8D6936BA3B368C036604571 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		D601FF082F9DCF7E0085B0A5 /* CredentialsConfigView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialsConfigView.swift; sourceTree = "<group>"; };
+		D601FF0A2F9DD09C0085B0A5 /* QRCodeScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeScannerView.swift; sourceTree = "<group>"; };
+		D601FF0C2F9DD0CC0085B0A5 /* Scriptsgenerate_credentials_qr.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = Scriptsgenerate_credentials_qr.py; sourceTree = "<group>"; };
+		D601FF0E2F9DD0EC0085B0A5 /* ScriptsREADME.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ScriptsREADME.md; sourceTree = "<group>"; };
+		D601FF102F9DD0FD0085B0A5 /* CAMERA_PERMISSION.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = CAMERA_PERMISSION.md; sourceTree = "<group>"; };
 		D81665B1BF0B72B2D44A7074 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		DBF2E89473E3121C279F1A1A /* DeletionRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeletionRecord.swift; sourceTree = "<group>"; };
 		DD036AA41B487C57D1735DEC /* HealthKitTestDataGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitTestDataGenerator.swift; sourceTree = "<group>"; };
@@ -208,6 +218,11 @@
 				30C3C52490A9B091CE2BA16B /* Assets.xcassets */,
 				579C22CD599937037AA9D96D /* NetworkMonitor.swift */,
 				4BF259A0CA7B3E66665D51EE /* SyncStatus.swift */,
+				D601FF082F9DCF7E0085B0A5 /* CredentialsConfigView.swift */,
+				D601FF0A2F9DD09C0085B0A5 /* QRCodeScannerView.swift */,
+				D601FF0C2F9DD0CC0085B0A5 /* Scriptsgenerate_credentials_qr.py */,
+				D601FF0E2F9DD0EC0085B0A5 /* ScriptsREADME.md */,
+				D601FF102F9DD0FD0085B0A5 /* CAMERA_PERMISSION.md */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -563,7 +578,10 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D601FF112F9DD0FD0085B0A5 /* CAMERA_PERMISSION.md in Resources */,
+				D601FF0D2F9DD0CC0085B0A5 /* Scriptsgenerate_credentials_qr.py in Resources */,
 				7AACBFE238416C3D8E9A9A5E /* Assets.xcassets in Resources */,
+				D601FF0F2F9DD0EC0085B0A5 /* ScriptsREADME.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -606,6 +624,7 @@
 				F4D0E4A168D3F4C7EF63ABB7 /* APIService.swift in Sources */,
 				202CAFDDE53EEC33D4777ABE /* AboutView.swift in Sources */,
 				F1A23A3279264C7869B16C8B /* ActivitySummary.swift in Sources */,
+				D601FF092F9DCF7E0085B0A5 /* CredentialsConfigView.swift in Sources */,
 				51E73F4412AE860673321844 /* ActivitySummaryMapper.swift in Sources */,
 				1C508F865AF230D0BB23AE4F /* AppDelegate.swift in Sources */,
 				F0F2F8E2B029957787E6EF50 /* AuthService.swift in Sources */,
@@ -647,6 +666,7 @@
 				E0CFEB52E74DB9D97FB970B8 /* SleepRecord.swift in Sources */,
 				0132082917F3C23F9488B35C /* SyncCoordinator.swift in Sources */,
 				FD0B59DD5642BE88458893DD /* SyncLedger.swift in Sources */,
+				D601FF0B2F9DD09C0085B0A5 /* QRCodeScannerView.swift in Sources */,
 				9F7B8A20F98F58FA629FE69F /* SyncRecord.swift in Sources */,
 				89A60E2B2C04BF4629DC5EF2 /* SyncStateRepository.swift in Sources */,
 				B0004CF6BD196732DFB4922B /* SyncStats.swift in Sources */,

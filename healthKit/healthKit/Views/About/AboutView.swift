@@ -6,6 +6,7 @@ struct AboutView: View {
     @EnvironmentObject private var syncCoordinator: SyncCoordinator
     @State private var permissionsViewModel: PermissionsViewModel?
     @State private var showOnboarding = false
+    @State private var showCredentialsConfig = false
     #if DEBUG
     @State private var showSPNCredentials = false
     @State private var isGeneratingTestData = false
@@ -39,6 +40,7 @@ struct AboutView: View {
                     healthKitTypesSection
                     howDataIsSentSection
                     permissionsSection
+                    credentialsSection
                     settingsSection
                     #if DEBUG
                     debugInfoSection
@@ -65,6 +67,9 @@ struct AboutView: View {
                     healthKitManager: healthKitManager
                 )
                 .environmentObject(healthKitManager)
+            }
+            .sheet(isPresented: $showCredentialsConfig) {
+                CredentialsConfigView()
             }
             #if DEBUG
             .sheet(isPresented: $showSPNCredentials) {
@@ -706,6 +711,94 @@ struct AboutView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .dbxCard()
+    }
+    
+    // MARK: - Credentials Configuration
+    
+    private var credentialsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("API Credentials")
+            
+            HStack(spacing: 12) {
+                Image(systemName: credentialsConfigured ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
+                    .font(.title2)
+                    .foregroundStyle(credentialsConfigured ? DBXColors.dbxGreen : DBXColors.dbxYellow)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(credentialsConfigured ? "Credentials Configured" : "Credentials Required")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    Text(credentialsConfigured ? 
+                         "Service principal credentials are stored securely in the Keychain." :
+                         "Configure your Databricks service principal credentials to enable data sync.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            
+            Button {
+                showCredentialsConfig = true
+            } label: {
+                HStack {
+                    Image(systemName: credentialsConfigured ? "pencil" : "key.fill")
+                    Text(credentialsConfigured ? "Update Credentials" : "Configure Credentials")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(DBXSecondaryButtonStyle())
+            
+            if credentialsConfigured {
+                credentialStatusRows
+            }
+            
+            Text("Credentials are stored securely in the iOS Keychain and never leave your device except when requesting authentication tokens from Databricks.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dbxCard()
+    }
+    
+    private var credentialStatusRows: some View {
+        VStack(spacing: 8) {
+            Divider()
+                .padding(.vertical, 4)
+            
+            HStack {
+                Image(systemName: "person.text.rectangle")
+                    .foregroundStyle(DBXColors.dbxRed)
+                    .frame(width: 24)
+                Text("Client ID")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(DBXColors.dbxGreen)
+                    .font(.caption)
+            }
+            
+            HStack {
+                Image(systemName: "key.fill")
+                    .foregroundStyle(DBXColors.dbxRed)
+                    .frame(width: 24)
+                Text("Client Secret")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(DBXColors.dbxGreen)
+                    .font(.caption)
+            }
+        }
+    }
+    
+    private var credentialsConfigured: Bool {
+        KeychainHelper.exists(for: KeychainHelper.Key.databricksClientID) &&
+        KeychainHelper.exists(for: KeychainHelper.Key.databricksClientSecret)
     }
     
     private func openAppSettings() {
