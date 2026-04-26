@@ -53,6 +53,7 @@
 		9F7B8A20F98F58FA629FE69F /* SyncRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 183B7B186EF23731B9CA9104 /* SyncRecord.swift */; };
 		A08FEBF6AA3B60852D88280A /* SPNCredentialsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06D5EC77EA32591331F745E1 /* SPNCredentialsView.swift */; };
 		A2CE00199C94EBEC587CDD5C /* MockAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 113902C3534F838C3958E426 /* MockAuthService.swift */; };
+		A315330B316FD82CBF175ECD /* SyncLedgerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F34E82891476B1380F5DB270 /* SyncLedgerTests.swift */; };
 		A3C10B16F6078F8494C6BE3E /* HealthKitTestDataGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD036AA41B487C57D1735DEC /* HealthKitTestDataGenerator.swift */; };
 		AEC1FBB26180060D2BB757C4 /* MockURLProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BCA9780775DB0D5356CEE19 /* MockURLProtocol.swift */; };
 		B0004CF6BD196732DFB4922B /* SyncStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADE09F3821FB596BF1F710CF /* SyncStats.swift */; };
@@ -175,6 +176,7 @@
 		ED772D6EB7F329AC1EA0873B /* SleepRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepRecord.swift; sourceTree = "<group>"; };
 		F01B70B15249CB58DCDA27AF /* APIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIService.swift; sourceTree = "<group>"; };
 		F1A8DB7F7F1C9A1A4604648E /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		F34E82891476B1380F5DB270 /* SyncLedgerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncLedgerTests.swift; sourceTree = "<group>"; };
 		F3A23CB44A42ED967C70BD6F /* dbxWearablesApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = dbxWearablesApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -433,6 +435,7 @@
 				2C97F568D0D1D9A7CF94AAD6 /* NDJSONSerializerTests.swift */,
 				98E44EDA0C1626F60C6FEFB4 /* SleepMapperTests.swift */,
 				5E77957F551BBE1FA552A440 /* SyncCoordinatorTests.swift */,
+				F34E82891476B1380F5DB270 /* SyncLedgerTests.swift */,
 				E429996675DB963BA4CB2C4F /* WorkoutMapperTests.swift */,
 			);
 			path = Services;
@@ -602,6 +605,7 @@
 				F8EC68682DB640DCB8FB539B /* NDJSONSerializerTests.swift in Sources */,
 				8B1B085F1858B53C713CAA60 /* SleepMapperTests.swift in Sources */,
 				B18B458E5898B3C1A562FD3E /* SyncCoordinatorTests.swift in Sources */,
+				A315330B316FD82CBF175ECD /* SyncLedgerTests.swift in Sources */,
 				8CDBC032AA26980FCFC05A7D /* SyncStatusTests.swift in Sources */,
 				3E73281F7C78B769CEEF7C4F /* WorkoutMapperTests.swift in Sources */,
 			);
