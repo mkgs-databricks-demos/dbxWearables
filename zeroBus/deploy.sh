@@ -458,7 +458,7 @@ verify_infra_readiness() {
   # ---- 1. Secret scope keys -----------------------------------------------
   # NOTE: CLI uses positional arg for scope, not --scope flag
   local secrets_json
-  secrets_json=$(databricks secrets list-secrets "${SCOPE_NAME}" --output json 2>&1) || {
+  secrets_json=$(databricks secrets list-secrets "${SCOPE_NAME}" --output json 2>/dev/null) || {
     echo ""
     echo "  Secret scope '${SCOPE_NAME}' not found or not accessible."
     echo "  The UC setup job must run first to create the SPN and populate secrets:"
@@ -474,8 +474,11 @@ verify_infra_readiness() {
   present_keys=$(echo "${secrets_json}" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
-for s in data.get('secrets', []):
-    print(s.get('key', ''))
+# Handle both {"secrets": [...]} (old CLI) and direct array [...] (new CLI)
+items = data.get('secrets', data) if isinstance(data, dict) else data
+for s in items:
+    if isinstance(s, dict):
+        print(s.get('key', ''))
 " 2>/dev/null) || fail "Could not parse secrets list from scope '${SCOPE_NAME}'."
 
   local missing_auto=()

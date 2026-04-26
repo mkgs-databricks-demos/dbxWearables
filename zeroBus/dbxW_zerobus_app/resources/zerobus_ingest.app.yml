@@ -243,6 +243,8 @@ resources:
           level: CAN_MANAGE
         - group_name: users
           level: CAN_USE
+        - service_principal_name: ${var.ios_bootstrap_spn_id}
+          level: CAN_USE
 
 # ---------------------------------------------------------------------------
 # Target-specific overrides
@@ -259,6 +261,8 @@ targets:
               level: CAN_MANAGE
             - group_name: users
               level: CAN_USE
+            - service_principal_name: ${var.ios_bootstrap_spn_id}
+              level: CAN_USE
               
 
   hls_fde:
@@ -273,6 +277,8 @@ targets:
               level: CAN_MANAGE
             - group_name: users
               level: CAN_USE
+            - service_principal_name: ${var.ios_bootstrap_spn_id}
+              level: CAN_USE
 
   prod:
     resources:
@@ -282,4 +288,6 @@ targets:
             - user_name: matthew.giglia@databricks.com
               level: CAN_MANAGE
             - group_name: users
+              level: CAN_USE
+            - service_principal_name: ${var.ios_bootstrap_spn_id}
               level: CAN_USE

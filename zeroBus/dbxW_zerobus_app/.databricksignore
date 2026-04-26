@@ -1,0 +1,4 @@
+.databricks/
+
+# Workspace filesystem artifact — ghost file the CLI tries to upload
+.bashrc

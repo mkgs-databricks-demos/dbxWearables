@@ -154,12 +154,13 @@ variables:
   #
   # deploy.sh reads this value from the scope at deploy time and passes
   # it as --var ios_bootstrap_spn_id=<value> to `bundle deploy`. No
-  # default — the infra bundle must be deployed first.
+  # default is empty; deploy.sh overrides via --var at deploy time.
   ios_bootstrap_spn_id:
     description: >
       Application ID (client ID) of the iOS Bootstrap SPN. Passed by
       deploy.sh via --var override (read from the secret scope at deploy
       time). Used in the app permissions block to grant CAN_USE.
+    default: ""
 
   # Tags — applied to all deployed resources via presets
   tags_project:
