@@ -61,6 +61,7 @@ CATALOG=""
 SCHEMA=""
 CLIENT_ID_DBS_KEY=""
 CLIENT_SECRET_DBS_KEY=""
+IOS_BOOTSTRAP_CLIENT_SECRET_KEY=""
 LAKEBASE_PROJECT_ID=""
 
 # Resolved at runtime after readiness checks — iOS SPN application_id
@@ -267,6 +268,11 @@ print(f'CATALOG=\"{safe(catalog)}\"')
 print(f'SCHEMA=\"{safe(schema)}\"')
 print(f'CLIENT_ID_DBS_KEY=\"{safe(client_id_key)}\"')
 print(f'CLIENT_SECRET_DBS_KEY=\"{safe(client_secret_key)}\"')
+
+# iOS bootstrap SPN client secret key (schema-qualified)
+ios_bootstrap_secret_key = variables.get('ios_bootstrap_client_secret_key', {})
+ios_bootstrap_secret_key = ios_bootstrap_secret_key.get('value', ios_bootstrap_secret_key.get('default', 'ios_bootstrap_client_secret'))
+print(f'IOS_BOOTSTRAP_CLIENT_SECRET_KEY=\"{safe(ios_bootstrap_secret_key)}\"')
 print(f'LAKEBASE_PROJECT_ID=\"{safe(project_id)}\"')
 " 2>/dev/null)" || fail "Could not parse bundle summary JSON."
 
@@ -286,6 +292,7 @@ print(f'LAKEBASE_PROJECT_ID=\"{safe(project_id)}\"')
   ok "Schema:              ${SCHEMA}"
   ok "Client ID key:       ${CLIENT_ID_DBS_KEY}"
   ok "Client secret key:   ${CLIENT_SECRET_DBS_KEY}"
+  ok "iOS SPN secret key: ${IOS_BOOTSTRAP_CLIENT_SECRET_KEY}"
 
   if [[ -n "${LAKEBASE_PROJECT_ID}" ]]; then
     ok "Lakebase project:    ${LAKEBASE_PROJECT_ID}"
@@ -305,7 +312,7 @@ print(f'LAKEBASE_PROJECT_ID=\"{safe(project_id)}\"')
 # --------------------------------------------------------------------------- #
 build_key_arrays() {
   AUTO_PROVISIONED_KEYS=("${CLIENT_ID_DBS_KEY}" workspace_url zerobus_endpoint target_table_name jwt_signing_secret apple_bundle_id ios_spn_application_id)
-  ADMIN_PROVISIONED_KEYS=("${CLIENT_SECRET_DBS_KEY}")
+  ADMIN_PROVISIONED_KEYS=("${CLIENT_SECRET_DBS_KEY}" "${IOS_BOOTSTRAP_CLIENT_SECRET_KEY}")
   REQUIRED_SCOPE_KEYS=("${AUTO_PROVISIONED_KEYS[@]}" "${ADMIN_PROVISIONED_KEYS[@]}")
 }
 

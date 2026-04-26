@@ -131,6 +131,12 @@ variables:
       application_id is stored under this key for the app's route guard
       (spn-route-guard.ts) to verify the SPN's identity.
     default: ios_spn_application_id
+  ios_bootstrap_client_secret_key:
+    description: >
+      The key name for the iOS Bootstrap SPN OAuth client secret in the
+      secret scope. Admin-provisioned — generate in the workspace UI and
+      store with: databricks secrets put-secret <scope> <key> --string-value "<secret>"
+    default: ios_bootstrap_client_secret
 
   run_as_user:
     description: The user or service principal that workflows should run as.
@@ -193,6 +199,7 @@ targets:
       run_as_user: matthew.giglia@databricks.com
       client_id_dbs_key: client_id_dev_matthew_giglia_${var.schema}
       client_secret_dbs_key: client_secret_dev_matthew_giglia_${var.schema}
+      ios_bootstrap_client_secret_key: ios_bootstrap_client_secret_dev_matthew_giglia_${var.schema}
       zerobus_stream_pool_size: "2"
 
   # ── hls_fde (production — same workspace as dev) ────────────────────────
@@ -220,6 +227,7 @@ targets:
       serverless_environment_version: "5"
       client_id_dbs_key: client_id_${var.schema}
       client_secret_dbs_key: client_secret_${var.schema}
+      ios_bootstrap_client_secret_key: ios_bootstrap_client_secret_${var.schema}
       lakebase_project_id: dbxw-zerobus-wearables-hls-fde
     permissions:
       - user_name: matthew.giglia@databricks.com
