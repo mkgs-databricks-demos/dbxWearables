@@ -79,18 +79,15 @@ struct SignInWithAppleView: View {
     private var unauthenticatedView: some View {
         VStack(spacing: 20) {
             SignInWithAppleButton(.signIn) { request in
-                request.requestedScopes = [.fullName, .email]
+                signInManager.prepareRequest(request)
             } onCompletion: { result in
-                // Handled by AppleSignInManager
+                Task {
+                    await signInManager.completeSignIn(result: result)
+                }
             }
             .signInWithAppleButtonStyle(.black)
             .frame(height: 50)
             .cornerRadius(8)
-            .onTapGesture {
-                Task {
-                    await signInManager.signIn()
-                }
-            }
             
             VStack(alignment: .leading, spacing: 12) {
                 benefitRow(icon: "lock.shield", title: "Secure", description: "Your data is protected with end-to-end encryption")
@@ -200,9 +197,7 @@ struct SignInWithAppleView: View {
                 .multilineTextAlignment(.center)
             
             Button {
-                Task {
-                    await signInManager.signIn()
-                }
+                signInManager.resetForRetry()
             } label: {
                 HStack {
                     Image(systemName: "arrow.clockwise")
