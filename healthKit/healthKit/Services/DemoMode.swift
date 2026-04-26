@@ -47,10 +47,15 @@ final class DemoModeManager: ObservableObject {
     
     /// Scheduled deletion times for HealthKit test data
     @Published var scheduledDeletions: [ScheduledDeletion] = []
-    
+
     /// Timer for checking scheduled deletions
     private var deletionTimer: Timer?
-    
+
+    /// HealthKit manager wired in by the view layer so the internal timer can
+    /// auto-fire deletions even when the About tab isn't visible. Held weakly
+    /// to avoid a retain cycle through the timer.
+    private weak var attachedHealthStore: HealthKitManager?
+
     init() {
         // Initialize currentMode from stored value
         if let mode = Mode(rawValue: storedMode) {
@@ -58,6 +63,12 @@ final class DemoModeManager: ObservableObject {
         }
         loadScheduledDeletions()
         startDeletionTimer()
+    }
+
+    /// Wire in the HealthKitManager that should be used by the periodic
+    /// deletion timer. Call from the owning view's `.task` modifier.
+    func attach(healthStore: HealthKitManager) {
+        attachedHealthStore = healthStore
     }
     
     // MARK: - Scheduled Deletions
@@ -111,29 +122,41 @@ final class DemoModeManager: ObservableObject {
         saveScheduledDeletions()
     }
     
-    /// Check for expired deletions and execute them
+    /// Closure that performs the actual synthetic-data deletion. The default
+    /// path goes through `HealthKitTestDataGenerator.deleteSyntheticData()`,
+    /// which is a bulk metadata-keyed delete; tests inject a stub.
+    typealias SyntheticDataDeleter = @Sendable () async throws -> Void
+
+    /// Check for expired deletions and execute them.
+    ///
+    /// `deleteSyntheticData` is a bulk metadata-keyed delete that removes
+    /// every synthetic sample/workout in one call — it doesn't honor a
+    /// per-schedule date or UUID filter. So whenever any scheduled deletion
+    /// has expired, we fire the deleter once and clear the entire schedule
+    /// list (including any future entries, whose underlying data the bulk
+    /// delete already wiped).
     func checkScheduledDeletions(healthStore: HealthKitManager) async {
-        let expired = scheduledDeletions.filter { $0.isExpired }
-        
-        guard !expired.isEmpty else { return }
-        
-        print("🗑️ Processing \(expired.count) expired deletion schedules...")
-        
-        for deletion in expired {
-            do {
-                let generator = HealthKitTestDataGenerator(healthStore: healthStore.healthStore)
-                try await generator.deleteSyntheticData()
-                
-                // Remove from scheduled list
-                scheduledDeletions.removeAll { $0.id == deletion.id }
-                
-                print("✅ Auto-deleted \(deletion.recordCount) test records")
-            } catch {
-                print("❌ Auto-deletion failed: \(error.localizedDescription)")
-            }
+        let store = healthStore.healthStore
+        await checkScheduledDeletions(using: {
+            try await HealthKitTestDataGenerator(healthStore: store).deleteSyntheticData()
+        })
+    }
+
+    /// Testable variant: execute pending deletions through an injected deleter.
+    func checkScheduledDeletions(using deleter: SyntheticDataDeleter) async {
+        guard scheduledDeletions.contains(where: { $0.isExpired }) else { return }
+
+        let totalRecords = scheduledDeletions.reduce(0) { $0 + $1.recordCount }
+        print("🗑️ Processing expired deletion (clears all synthetic data, \(scheduledDeletions.count) schedule(s))...")
+
+        do {
+            try await deleter()
+            scheduledDeletions.removeAll()
+            saveScheduledDeletions()
+            print("✅ Auto-deleted \(totalRecords) test records across all schedules")
+        } catch {
+            print("❌ Auto-deletion failed: \(error.localizedDescription)")
         }
-        
-        saveScheduledDeletions()
     }
     
     // MARK: - Persistence
@@ -157,14 +180,17 @@ final class DemoModeManager: ObservableObject {
     // MARK: - Timer
     
     private func startDeletionTimer() {
-        // Check every minute for expired deletions
+        // Check every minute for expired deletions. The view layer must call
+        // `attach(healthStore:)` so the timer has somewhere to send the work;
+        // until then the timer is a no-op (UI refresh only).
         deletionTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            
-            Task { @MainActor in
-                // Note: This requires HealthKitManager to be injected
-                // We'll handle this in the view layer
-                self.objectWillChange.send()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let healthStore = self.attachedHealthStore {
+                    await self.checkScheduledDeletions(healthStore: healthStore)
+                } else {
+                    self.objectWillChange.send()
+                }
             }
         }
     }
