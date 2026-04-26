@@ -21,7 +21,7 @@ enum SyncStatus: Equatable {
             return "Ready to sync"
         case .syncing(let progress):
             return progress.message
-        case .retrying(let attempt, let reason):
+        case .retrying(let attempt, _):
             return "Retrying (attempt \(attempt))..."
         case .success(let summary):
             return "✓ Synced \(summary.totalRecords) records"

@@ -18,6 +18,10 @@ enum KeychainHelper {
         static let oauthAccessToken = "oauth_access_token"
         /// Cached OAuth access token expiry as ISO-8601 string.
         static let oauthAccessTokenExpiry = "oauth_access_token_expiry"
+        /// User JWT from Sign in with Apple exchange
+        static let userJWT = "user_jwt"
+        /// User JWT expiry timestamp
+        static let userJWTExpiry = "user_jwt_expiry"
     }
 
     private static let service = "com.dbxwearables.api"

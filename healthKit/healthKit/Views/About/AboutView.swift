@@ -4,11 +4,13 @@ import SwiftUI
 struct AboutView: View {
     @EnvironmentObject private var healthKitManager: HealthKitManager
     @EnvironmentObject private var syncCoordinator: SyncCoordinator
+    @StateObject private var demoModeManager = DemoModeManager()
+    @StateObject private var signInManager = AppleSignInManager()
     @State private var permissionsViewModel: PermissionsViewModel?
     @State private var showOnboarding = false
     @State private var showCredentialsConfig = false
+    @State private var showSignIn = false
     #if DEBUG
-    @State private var showSPNCredentials = false
     @State private var isGeneratingTestData = false
     @State private var showTestDataAlert = false
     @State private var testDataMessage = ""
@@ -40,13 +42,14 @@ struct AboutView: View {
                     healthKitTypesSection
                     howDataIsSentSection
                     permissionsSection
+                    signInSection
                     credentialsSection
                     settingsSection
+                    demoModeSection
                     #if DEBUG
                     debugInfoSection
                     integrationTestSection
                     testDataSection
-                    spnCredentialsSection
                     #endif
                     replayOnboardingSection
                 }
@@ -71,10 +74,10 @@ struct AboutView: View {
             .sheet(isPresented: $showCredentialsConfig) {
                 CredentialsConfigView()
             }
-            #if DEBUG
-            .sheet(isPresented: $showSPNCredentials) {
-                SPNCredentialsView()
+            .sheet(isPresented: $showSignIn) {
+                SignInWithAppleView()
             }
+            #if DEBUG
             .alert("Test Data", isPresented: $showTestDataAlert) {
                 Button("OK", role: .cancel) { }
             } message: {
@@ -423,23 +426,41 @@ struct AboutView: View {
                     includeAdvancedMetrics: includeAdvancedMetrics
                 )
                 
-                let generator = HealthKitTestDataGenerator(healthStore: healthKitManager.healthStore)
-                try await generator.generateSampleData(config: config)
-                
-                await MainActor.run {
-                    testDataMessage = """
-                    ✅ Successfully generated \(daysToGenerate) days of realistic health data!
+                // Check demo mode
+                if demoModeManager.currentMode == .mock {
+                    // Mock mode: Generate data directly without HealthKit
+                    await generateMockData(config: config)
+                } else {
+                    // HealthKit mode: Write to HealthKit and schedule deletion
+                    let generator = HealthKitTestDataGenerator(healthStore: healthKitManager.healthStore)
+                    try await generator.generateSampleData(config: config)
                     
-                    Fitness Level: \(fitnessLevel.displayName)
-                    Weekend Variation: \(includeWeekendVariation ? "Yes" : "No")
-                    Workouts: \(includeWorkouts ? "Yes" : "No")
-                    Sleep Stages: \(includeSleepStages ? "Yes" : "No")
-                    Advanced Metrics: \(includeAdvancedMetrics ? "Yes" : "No")
+                    // Schedule auto-deletion in 1 hour
+                    let estimatedRecords = estimateRecordCount(config: config)
+                    await MainActor.run {
+                        demoModeManager.scheduleHealthKitDeletion(
+                            recordCount: estimatedRecords,
+                            dataTypes: ["Samples", "Workouts", "Sleep"]
+                        )
+                    }
                     
-                    All data is tagged as synthetic. Go to Dashboard and tap "Sync Now" to upload!
-                    """
-                    showTestDataAlert = true
-                    isGeneratingTestData = false
+                    await MainActor.run {
+                        testDataMessage = """
+                        ✅ Successfully generated \(daysToGenerate) days of realistic health data!
+                        
+                        Fitness Level: \(fitnessLevel.displayName)
+                        Weekend Variation: \(includeWeekendVariation ? "Yes" : "No")
+                        Workouts: \(includeWorkouts ? "Yes" : "No")
+                        Sleep Stages: \(includeSleepStages ? "Yes" : "No")
+                        Advanced Metrics: \(includeAdvancedMetrics ? "Yes" : "No")
+                        
+                        ⏰ Auto-deletion scheduled in 1 hour
+                        
+                        All data is tagged as synthetic. Go to Dashboard and tap "Sync Now" to upload!
+                        """
+                        showTestDataAlert = true
+                        isGeneratingTestData = false
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -449,6 +470,44 @@ struct AboutView: View {
                 }
             }
         }
+    }
+    
+    private func generateMockData(config: GeneratorConfig) async {
+        // Generate mock data without HealthKit
+        let samples = MockDataGenerator.generateMockSamples(days: config.daysToGenerate, fitnessLevel: config.fitnessLevel)
+        let workouts = config.includeWorkouts ? MockDataGenerator.generateMockWorkouts(count: config.daysToGenerate / 3) : []
+        
+        // In mock mode, we would inject these directly into the sync pipeline
+        // For now, just show success message
+        await MainActor.run {
+            testDataMessage = """
+            ✅ Generated \(samples.count) mock samples in-memory!
+            
+            Mode: Mock (No HealthKit)
+            Samples: \(samples.count)
+            Workouts: \(workouts.count)
+            
+            💡 Tap "Sync Now" to send mock data to API without writing to Health app.
+            
+            Note: Mock data is temporary and won't persist in HealthKit.
+            """
+            showTestDataAlert = true
+            isGeneratingTestData = false
+        }
+    }
+    
+    private func estimateRecordCount(config: GeneratorConfig) -> Int {
+        var count = config.daysToGenerate * 10 // ~10 samples per day
+        if config.includeWorkouts {
+            count += config.daysToGenerate / 3 // ~3 workouts per week
+        }
+        if config.includeSleepStages {
+            count += config.daysToGenerate // 1 sleep session per day
+        }
+        if config.includeAdvancedMetrics {
+            count += config.daysToGenerate * 5 // Additional metrics
+        }
+        return count
     }
     
     private func generateTestWorkout() {
@@ -526,34 +585,6 @@ struct AboutView: View {
     // MARK: - SPN Credentials (Debug)
 
 
-    private var spnCredentialsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("Service Principal Credentials")
-
-            HStack {
-                Image(systemName: spnConfigured ? "checkmark.shield.fill" : "exclamationmark.shield")
-                    .foregroundStyle(spnConfigured ? DBXColors.dbxGreen : DBXColors.dbxYellow)
-                Text(spnConfigured ? "Credentials configured" : "Credentials not configured")
-                    .font(.subheadline)
-            }
-
-            Button("Configure") {
-                showSPNCredentials = true
-            }
-            .buttonStyle(DBXSecondaryButtonStyle())
-
-            Text("Debug builds only. Paste a Databricks service-principal client ID + secret to enable OAuth bearer-token requests.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .dbxCard()
-    }
-
-    private var spnConfigured: Bool {
-        KeychainHelper.exists(for: KeychainHelper.Key.databricksClientID)
-            && KeychainHelper.exists(for: KeychainHelper.Key.databricksClientSecret)
-    }
     #endif
 
     // MARK: - Purpose
@@ -713,6 +744,63 @@ struct AboutView: View {
         .dbxCard()
     }
     
+    // MARK: - Sign In
+    
+    private var signInSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("User Authentication")
+            
+            HStack(spacing: 12) {
+                Image(systemName: signInManager.authState.isAuthenticated ? "person.crop.circle.fill.badge.checkmark" : "person.crop.circle.badge.questionmark")
+                    .font(.title2)
+                    .foregroundStyle(signInManager.authState.isAuthenticated ? DBXColors.dbxGreen : DBXColors.dbxYellow)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(signInManager.authState.isAuthenticated ? "Signed In" : "Not Signed In")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    if let user = signInManager.currentUser {
+                        if let email = user.email {
+                            Text(email)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("Session expires \(user.jwtExpiresAt, style: .relative)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Sign in required to sync health data")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                
+                Spacer()
+            }
+            
+            Button {
+                showSignIn = true
+            } label: {
+                HStack {
+                    Image(systemName: signInManager.authState.isAuthenticated ? "person.fill" : "person.crop.circle.badge.plus")
+                    Text(signInManager.authState.isAuthenticated ? "Manage Account" : "Sign In with Apple")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(DBXSecondaryButtonStyle())
+            
+            Text("Sign in with your Apple ID to create a secure session for uploading health data. Your Apple ID is used to generate a JWT token authenticated by Databricks.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dbxCard()
+    }
+    
     // MARK: - Credentials Configuration
     
     private var credentialsSection: some View {
@@ -830,6 +918,140 @@ struct AboutView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .dbxCard()
+    }
+    
+    // MARK: - Demo Mode
+    
+    private var demoModeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("Demo Mode")
+            
+            Text("Choose how test data is generated for demonstrations.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            
+            // Mode selector
+            VStack(spacing: 12) {
+                ForEach(DemoModeManager.Mode.allCases, id: \.self) { mode in
+                    demoModeOption(mode)
+                }
+            }
+            
+            // Scheduled deletions (if any)
+            if !demoModeManager.scheduledDeletions.isEmpty {
+                Divider()
+                    .padding(.vertical, 4)
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "clock.badge.exclamationmark")
+                            .foregroundStyle(DBXColors.dbxYellow)
+                        Text("Scheduled Cleanups")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                    }
+                    
+                    ForEach(demoModeManager.scheduledDeletions) { deletion in
+                        scheduledDeletionRow(deletion)
+                    }
+                }
+            }
+            
+            Text(demoModeFooter)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dbxCard()
+        .task {
+            // Check for expired deletions on view appear
+            await demoModeManager.checkScheduledDeletions(healthStore: healthKitManager)
+        }
+    }
+    
+    private func demoModeOption(_ mode: DemoModeManager.Mode) -> some View {
+        Button {
+            withAnimation {
+                demoModeManager.currentMode = mode
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: mode.icon)
+                    .font(.title3)
+                    .foregroundStyle(demoModeManager.currentMode == mode ? DBXColors.dbxRed : .secondary)
+                    .frame(width: 32)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(mode.displayName)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.primary)
+                    
+                    Text(mode.description)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+                
+                Spacer()
+                
+                if demoModeManager.currentMode == mode {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(DBXColors.dbxGreen)
+                }
+            }
+            .padding(12)
+            .background(demoModeManager.currentMode == mode ? DBXColors.dbxRed.opacity(0.1) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(demoModeManager.currentMode == mode ? DBXColors.dbxRed : Color.gray.opacity(0.2), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+    
+    private func scheduledDeletionRow(_ deletion: DemoModeManager.ScheduledDeletion) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(deletion.recordCount) test records")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                
+                Text("Auto-deletes in \(deletion.formattedTimeRemaining)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            
+            Spacer()
+            
+            Button {
+                // Execute deletion now
+                Task {
+                    let generator = HealthKitTestDataGenerator(healthStore: healthKitManager.healthStore)
+                    try? await generator.deleteSyntheticData()
+                    demoModeManager.cancelScheduledDeletion(deletion)
+                }
+            } label: {
+                Text("Delete Now")
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+            }
+            .buttonStyle(DBXSecondaryButtonStyle())
+        }
+        .padding(8)
+        .background(DBXColors.dbxYellow.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+    
+    private var demoModeFooter: String {
+        switch demoModeManager.currentMode {
+        case .healthKit:
+            return "Test data is written to Apple Health and automatically deleted after 1 hour. Ideal for full integration demos."
+        case .mock:
+            return "Test data is generated in-memory only. No HealthKit write permissions required. Best for quick API testing."
+        }
     }
 
     private func settingRow(_ label: String, value: String) -> some View {

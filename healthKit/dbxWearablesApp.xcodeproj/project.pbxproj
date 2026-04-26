@@ -69,6 +69,9 @@
 		CF7378DFC6AE14E2826023D5 /* NDJSONLineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E9E05C3D2BBFD9326BD62AB /* NDJSONLineView.swift */; };
 		D182BF610BDDDA3C40E8725B /* HealthSampleMapperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F393872EFF0517F3F8E6CBD /* HealthSampleMapperTests.swift */; };
 		D40CD3546532B7D23780375F /* TestResultsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88BE3D9A47EB88F6A404CD83 /* TestResultsView.swift */; };
+		D601FF132F9E22DA0085B0A5 /* DemoMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = D601FF122F9E22DA0085B0A5 /* DemoMode.swift */; };
+		D601FF152F9E365C0085B0A5 /* AppleSignInManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D601FF142F9E365C0085B0A5 /* AppleSignInManager.swift */; };
+		D601FF172F9E36860085B0A5 /* SignInWithAppleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D601FF162F9E36860085B0A5 /* SignInWithAppleView.swift */; };
 		D75BDC9E9438F2219BEE4F29 /* HealthKitQueryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A857A58F181C55BD46FD2DE5 /* HealthKitQueryService.swift */; };
 		DAFEE242A161036772BD847E /* PayloadInspectorViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B548542332EFC8C1AB88F977 /* PayloadInspectorViewModel.swift */; };
 		DE3B6EF6EE222D1333DAAC1A /* APIResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21BDA56D69A95F4AC2CC4B4B /* APIResponse.swift */; };
@@ -131,7 +134,7 @@
 		4BF259A0CA7B3E66665D51EE /* SyncStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStatus.swift; sourceTree = "<group>"; };
 		4C6ED2A5BAD0CEE00CA05B0F /* DBXTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DBXTheme.swift; sourceTree = "<group>"; };
 		4F0F8F805DB27EE41139E2CB /* DatabricksLogo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabricksLogo.swift; sourceTree = "<group>"; };
-		53AC1936E17298132CF6A9F4 /* healthKitUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = healthKitUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		53AC1936E17298132CF6A9F4 /* healthKitUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = healthKitUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		579C22CD599937037AA9D96D /* NetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
 		5AE21853ED13BFC4CCB85E97 /* DBXButtonStyles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DBXButtonStyles.swift; sourceTree = "<group>"; };
 		5E77957F551BBE1FA552A440 /* SyncCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncCoordinatorTests.swift; sourceTree = "<group>"; };
@@ -146,7 +149,7 @@
 		722CC20040A3E3F85B0E40EC /* DeviceIdentifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentifier.swift; sourceTree = "<group>"; };
 		7BCA9780775DB0D5356CEE19 /* MockURLProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockURLProtocol.swift; sourceTree = "<group>"; };
 		7FA0E004A7DC1F76DDD5E912 /* HealthKitConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitConfiguration.swift; sourceTree = "<group>"; };
-		8706EDAC5ABF89B76A25B86C /* healthKitTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = healthKitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		8706EDAC5ABF89B76A25B86C /* healthKitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = healthKitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		87D86A2DD23DA0D41CBF5E4C /* PermissionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsView.swift; sourceTree = "<group>"; };
 		880FCBB261A8729153A8D0A3 /* SyncLedger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncLedger.swift; sourceTree = "<group>"; };
 		8871DEFC606E439AFE61A978 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
@@ -169,6 +172,9 @@
 		BF5B3CCCDE16F7593C0EF831 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		C8D6936BA3B368C036604571 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		C94FFBEE661B615D89CADA65 /* OnboardingFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowUITests.swift; sourceTree = "<group>"; };
+		D601FF122F9E22DA0085B0A5 /* DemoMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoMode.swift; sourceTree = "<group>"; };
+		D601FF142F9E365C0085B0A5 /* AppleSignInManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInManager.swift; sourceTree = "<group>"; };
+		D601FF162F9E36860085B0A5 /* SignInWithAppleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInWithAppleView.swift; sourceTree = "<group>"; };
 		D81665B1BF0B72B2D44A7074 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		D9250064D72B4E14040C6036 /* SyncStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStatusTests.swift; sourceTree = "<group>"; };
 		DBF2E89473E3121C279F1A1A /* DeletionRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeletionRecord.swift; sourceTree = "<group>"; };
@@ -181,7 +187,7 @@
 		F01B70B15249CB58DCDA27AF /* APIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIService.swift; sourceTree = "<group>"; };
 		F1A8DB7F7F1C9A1A4604648E /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		F34E82891476B1380F5DB270 /* SyncLedgerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncLedgerTests.swift; sourceTree = "<group>"; };
-		F3A23CB44A42ED967C70BD6F /* dbxWearablesApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = dbxWearablesApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F3A23CB44A42ED967C70BD6F /* dbxWearablesApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = dbxWearablesApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -321,6 +327,9 @@
 				880FCBB261A8729153A8D0A3 /* SyncLedger.swift */,
 				88BE3D9A47EB88F6A404CD83 /* TestResultsView.swift */,
 				2E2972975AAAC31DEB50484C /* WorkoutMapper.swift */,
+				D601FF122F9E22DA0085B0A5 /* DemoMode.swift */,
+				D601FF142F9E365C0085B0A5 /* AppleSignInManager.swift */,
+				D601FF162F9E36860085B0A5 /* SignInWithAppleView.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -554,7 +563,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 1430;
+				LastUpgradeCheck = 2620;
 				TargetAttributes = {
 					4204B045AB0FCED2D70B74DD = {
 						DevelopmentTeam = "";
@@ -648,6 +657,7 @@
 				1C508F865AF230D0BB23AE4F /* AppDelegate.swift in Sources */,
 				F0F2F8E2B029957787E6EF50 /* AuthService.swift in Sources */,
 				C50695A5489DBE0D3EACA311 /* CategoryDetailView.swift in Sources */,
+				D601FF132F9E22DA0085B0A5 /* DemoMode.swift in Sources */,
 				EC099C9843810E4C44128575 /* CategoryStatCard.swift in Sources */,
 				4F0B414D928FAEC655BD2F8A /* CredentialsConfigView.swift in Sources */,
 				E68CF07141C8F8D0329EC559 /* DBXButtonStyles.swift in Sources */,
@@ -678,6 +688,8 @@
 				F022D4E994CDCB6D1B3C9819 /* NetworkMonitor.swift in Sources */,
 				530845BD57BACD93B5C202D2 /* OnboardingView.swift in Sources */,
 				9305083D7FB8B8DB3AA12176 /* PayloadInspectorView.swift in Sources */,
+				D601FF152F9E365C0085B0A5 /* AppleSignInManager.swift in Sources */,
+				D601FF172F9E36860085B0A5 /* SignInWithAppleView.swift in Sources */,
 				DAFEE242A161036772BD847E /* PayloadInspectorViewModel.swift in Sources */,
 				6D2C8120CD618101F676972A /* PermissionsView.swift in Sources */,
 				793E81090E41B0544A46A45A /* PermissionsViewModel.swift in Sources */,
@@ -742,8 +754,8 @@
 		2EA0CAE950B9908A7E6AE803 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = NO;
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -793,6 +805,7 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.9;
@@ -802,8 +815,8 @@
 		4E408049E690A0DD3118C34D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = NO;
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -860,6 +873,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.9;

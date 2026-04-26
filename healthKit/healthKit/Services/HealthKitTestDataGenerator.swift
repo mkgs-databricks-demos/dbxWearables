@@ -458,15 +458,45 @@ final class HealthKitTestDataGenerator {
         
         let workoutEnd = workoutStart.addingTimeInterval(duration)
         
-        let workout = HKWorkout(
-            activityType: type,
+        // Use HKWorkoutBuilder (iOS 17+) to create workout
+        let configuration = HKWorkoutConfiguration()
+        configuration.activityType = type
+        
+        let builder = HKWorkoutBuilder(healthStore: healthStore, configuration: configuration, device: .local())
+        
+        // Start the workout session
+        try await builder.beginCollection(at: workoutStart)
+        
+        // Add energy burned if available
+        let energyBurned = HKQuantity(unit: .kilocalorie(), doubleValue: calories)
+        let energySample = HKCumulativeQuantitySample(
+            type: HKQuantityType(.activeEnergyBurned),
+            quantity: energyBurned,
             start: workoutStart,
-            end: workoutEnd,
-            duration: duration,
-            totalEnergyBurned: HKQuantity(unit: .kilocalorie(), doubleValue: calories),
-            totalDistance: distance.map { HKQuantity(unit: .meter(), doubleValue: $0) },
-            metadata: metadata
+            end: workoutEnd
         )
+        try await builder.addSamples([energySample])
+        
+        // Add distance if applicable
+        if let distance = distance {
+            let distanceQuantity = HKQuantity(unit: .meter(), doubleValue: distance)
+            let distanceSample = HKCumulativeQuantitySample(
+                type: HKQuantityType(.distanceWalkingRunning),
+                quantity: distanceQuantity,
+                start: workoutStart,
+                end: workoutEnd
+            )
+            try await builder.addSamples([distanceSample])
+        }
+        
+        // Add metadata
+        try await builder.addMetadata(metadata)
+        
+        // Finish and create the workout
+        try await builder.endCollection(at: workoutEnd)
+        guard let workout = try await builder.finishWorkout() else {
+            throw NSError(domain: "Generator", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to create workout"])
+        }
         
         return workout
     }
@@ -494,17 +524,44 @@ final class HealthKitTestDataGenerator {
         let endDate = startDate.addingTimeInterval(duration)
         let metadata = createMetadata()
         
-        let workout = HKWorkout(
-            activityType: type,
-            start: startDate,
-            end: endDate,
-            duration: duration,
-            totalEnergyBurned: HKQuantity(unit: .kilocalorie(), doubleValue: 250),
-            totalDistance: HKQuantity(unit: .meter(), doubleValue: 5000),
-            metadata: metadata
-        )
+        // Use HKWorkoutBuilder (iOS 17+)
+        let configuration = HKWorkoutConfiguration()
+        configuration.activityType = type
         
-        try await healthStore.save(workout)
+        let builder = HKWorkoutBuilder(healthStore: healthStore, configuration: configuration, device: .local())
+        
+        // Start the workout
+        try await builder.beginCollection(at: startDate)
+        
+        // Add energy burned
+        let energySample = HKCumulativeQuantitySample(
+            type: HKQuantityType(.activeEnergyBurned),
+            quantity: HKQuantity(unit: .kilocalorie(), doubleValue: 250),
+            start: startDate,
+            end: endDate
+        )
+        try await builder.addSamples([energySample])
+        
+        // Add distance (for running/walking/cycling)
+        if type == .running || type == .walking || type == .cycling {
+            let distanceSample = HKCumulativeQuantitySample(
+                type: HKQuantityType(.distanceWalkingRunning),
+                quantity: HKQuantity(unit: .meter(), doubleValue: 5000),
+                start: startDate,
+                end: endDate
+            )
+            try await builder.addSamples([distanceSample])
+        }
+        
+        // Add metadata
+        try await builder.addMetadata(metadata)
+        
+        // Finish the workout
+        try await builder.endCollection(at: endDate)
+        guard let _ = try await builder.finishWorkout() else {
+            throw NSError(domain: "Generator", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to create workout"])
+        }
+        
         print("✅ Generated workout: \(type.displayName) for \(Int(duration/60)) minutes")
     }
     

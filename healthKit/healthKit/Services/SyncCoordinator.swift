@@ -10,9 +10,9 @@ import OSLog
 @MainActor
 final class SyncCoordinator: ObservableObject {
 
-    private let queryService: HealthKitQueryService
-    private let apiService: APIService
-    private let syncStateRepository: SyncStateRepository
+    nonisolated(unsafe) private let queryService: HealthKitQueryService
+    nonisolated(unsafe) private let apiService: APIService
+    nonisolated(unsafe) private let syncStateRepository: SyncStateRepository
     let syncLedger: SyncLedger
     private let networkMonitor: NetworkMonitor
 
@@ -77,50 +77,74 @@ final class SyncCoordinator: ObservableObject {
         Log.sync.info("✓ Set isSyncing = true, syncStatus = .syncing")
 
         let batchSize = HealthKitConfiguration.queryBatchSize(for: context)
+        
+        // Track sync errors
+        var encounteredAuthError = false
 
-        let totalRecords = await withTaskGroup(of: Int.self, returning: Int.self) { group in
+        let totalRecords = await withTaskGroup(of: SyncResult.self, returning: Int.self) { group in
 
             // Quantity types — each runs its own batched sync loop concurrently.
             for quantityType in HealthKitConfiguration.quantityTypes {
                 group.addTask {
-                    await self.syncSampleType(quantityType, batchSize: batchSize, recordType: "samples") { samples in
+                    let count = await self.syncSampleType(quantityType, batchSize: batchSize, recordType: "samples") { samples in
                         HealthSampleMapper.mapQuantitySamples(samples)
                     }
+                    return SyncResult(recordCount: count, hasAuthError: count == -1)
                 }
             }
 
             // Stand hour — category type, mapped as a HealthSample.
             group.addTask {
                 let standHourType = HKCategoryType(.appleStandHour)
-                return await self.syncSampleType(standHourType, batchSize: batchSize, recordType: "samples") { samples in
+                let count = await self.syncSampleType(standHourType, batchSize: batchSize, recordType: "samples") { samples in
                     HealthSampleMapper.mapCategorySamples(samples)
                 }
+                return SyncResult(recordCount: count, hasAuthError: count == -1)
             }
 
             // Workouts
             group.addTask {
                 let workoutType = HKSeriesType.workoutType()
-                return await self.syncSampleType(workoutType, batchSize: batchSize, recordType: "workouts") { samples in
+                let count = await self.syncSampleType(workoutType, batchSize: batchSize, recordType: "workouts") { samples in
                     WorkoutMapper.mapWorkouts(samples)
                 }
+                return SyncResult(recordCount: count, hasAuthError: count == -1)
             }
 
             // Sleep — unbatched, but still runs concurrently with the other types.
             group.addTask {
-                await self.syncSleep()
+                let count = await self.syncSleep()
+                return SyncResult(recordCount: count, hasAuthError: count == -1)
             }
 
             // Activity summaries — date-range query, runs concurrently.
             group.addTask {
-                await self.syncActivitySummaries()
+                let count = await self.syncActivitySummaries()
+                return SyncResult(recordCount: count, hasAuthError: count == -1)
             }
 
             // Aggregate record counts as each type completes.
             var total = 0
-            for await count in group {
-                total += count
+            for await result in group {
+                if result.hasAuthError {
+                    encounteredAuthError = true
+                }
+                // Don't count -1 (error marker) in total
+                if result.recordCount > 0 {
+                    total += result.recordCount
+                }
             }
             return total
+        }
+        
+        // If we encountered a 403 error, report authentication failure
+        if encounteredAuthError {
+            Log.sync.error("❌ Sync failed: Authentication error (403)")
+            lastSyncDate = Date()
+            lastSyncRecordCount = 0
+            syncStatus = .failed(error: .authenticationFailed)
+            isSyncing = false
+            return
         }
 
         let duration = Date().timeIntervalSince(startTime)
@@ -132,6 +156,12 @@ final class SyncCoordinator: ObservableObject {
             stats: stats,
             duration: duration
         )
+    }
+    
+    /// Result from syncing a single data type
+    private struct SyncResult {
+        let recordCount: Int
+        let hasAuthError: Bool
     }
     
     /// Update all sync completion state atomically
@@ -174,7 +204,7 @@ final class SyncCoordinator: ObservableObject {
     /// Each batch is an independent commit point. If a POST fails or the background
     /// window expires mid-loop, all previously completed batches are already persisted.
     ///
-    /// Returns the total number of records uploaded across all batches.
+    /// Returns the total number of records uploaded across all batches, or -1 if auth error.
     nonisolated private func syncSampleType<T: Encodable>(
         _ sampleType: HKSampleType,
         batchSize: Int,
@@ -213,22 +243,28 @@ final class SyncCoordinator: ObservableObject {
 
             // POST new/updated records.
             if !mapped.isEmpty {
-                let posted = await postBatchWithRetry(
+                let postResult = await postBatchWithRetry(
                     mapped,
                     recordType: recordType,
                     label: sampleType.identifier
                 )
-                guard posted else { break }
+                if postResult == .authError {
+                    return -1  // Signal auth error
+                }
+                guard postResult == .success else { break }
             }
 
             // POST deletions for this batch.
             if !deletions.isEmpty {
-                let posted = await postBatchWithRetry(
+                let postResult = await postBatchWithRetry(
                     deletions,
                     recordType: "deletes",
                     label: "\(sampleType.identifier)/deletes"
                 )
-                if !posted {
+                if postResult == .authError {
+                    return -1  // Signal auth error
+                }
+                if postResult != .success {
                     Log.sync.warning("\(sampleType.identifier): deletion POST failed, will retry next sync")
                     // Don't break — the records POST succeeded, but we won't advance
                     // the anchor so deletions are re-sent next time.
@@ -284,13 +320,19 @@ final class SyncCoordinator: ObservableObject {
             }
 
             if !mapped.isEmpty {
-                let posted = await postBatchWithRetry(mapped, recordType: "sleep", label: "sleep")
-                guard posted else { return 0 }
+                let postResult = await postBatchWithRetry(mapped, recordType: "sleep", label: "sleep")
+                if postResult == .authError {
+                    return -1
+                }
+                guard postResult == .success else { return 0 }
             }
 
             if !deletions.isEmpty {
-                let posted = await postBatchWithRetry(deletions, recordType: "deletes", label: "sleep/deletes")
-                guard posted else { return 0 }
+                let postResult = await postBatchWithRetry(deletions, recordType: "deletes", label: "sleep/deletes")
+                if postResult == .authError {
+                    return -1
+                }
+                guard postResult == .success else { return 0 }
             }
 
             if let newAnchor = result.newAnchor {
@@ -304,25 +346,32 @@ final class SyncCoordinator: ObservableObject {
     }
 
     // MARK: - POST with retry
+    
+    /// Result of posting a batch
+    private enum PostResult {
+        case success
+        case authError  // 401 or 403
+        case failure    // Other errors
+    }
 
     /// Attempt to POST a batch of records. On retryable errors (429, 5xx), wait
     /// briefly and retry once. On non-retryable errors (4xx), fail immediately
     /// to avoid wasting the background execution window.
     ///
-    /// Returns `true` if the POST succeeded (first attempt or retry).
+    /// Returns `.success` if the POST succeeded, `.authError` for 401/403, `.failure` otherwise.
     /// On success, records the payload and metadata in SyncLedger for demo inspection.
     nonisolated private func postBatchWithRetry<T: Encodable>(
         _ records: [T],
         recordType: String,
         label: String
-    ) async -> Bool {
+    ) async -> PostResult {
         // Capture the NDJSON string before posting so we can store it in the ledger.
         let ndjsonString: String
         do {
             ndjsonString = try NDJSONSerializer.encodeToString(records)
         } catch {
             Log.sync.error("\(label): NDJSON serialization failed — \(error.localizedDescription)")
-            return false
+            return .failure
         }
 
         let headers: [String: String]
@@ -330,7 +379,7 @@ final class SyncCoordinator: ObservableObject {
             headers = try await apiService.buildRequestHeaders(for: recordType)
         } catch {
             Log.sync.error("\(label): failed to build request headers — \(error.localizedDescription)")
-            return false
+            return .authError  // Auth token fetch failed
         }
 
         do {
@@ -343,29 +392,49 @@ final class SyncCoordinator: ObservableObject {
                 ndjsonPayload: ndjsonString,
                 requestHeaders: headers
             )
-            return true
-        } catch let error as APIError where error.isRetryable {
-            Log.sync.warning("\(label): retryable error (\(error.localizedDescription)), retrying in 2s...")
-            try? await Task.sleep(for: .seconds(2))
-
-            do {
-                let response = try await apiService.postRecords(records, recordType: recordType)
-                Log.sync.info("\(label): retry succeeded (\(records.count) records) — \(response.status)")
-                await syncLedger.recordSync(
-                    recordType: recordType,
-                    recordCount: records.count,
-                    httpStatusCode: 200,
-                    ndjsonPayload: ndjsonString,
-                    requestHeaders: headers
-                )
-                return true
-            } catch {
-                Log.sync.error("\(label): retry failed (\(records.count) records) — \(error.localizedDescription)")
-                return false
+            return .success
+        } catch let error as APIError {
+            // Check for auth errors (401, 403)
+            if case .httpError(let statusCode) = error, statusCode == 401 || statusCode == 403 {
+                Log.sync.error("\(label): authentication error (\(statusCode)) — \(error.localizedDescription)")
+                return .authError
             }
+            
+            // Retry logic for retryable errors
+            if error.isRetryable {
+                Log.sync.warning("\(label): retryable error (\(error.localizedDescription)), retrying in 2s...")
+                try? await Task.sleep(for: .seconds(2))
+
+                do {
+                    let response = try await apiService.postRecords(records, recordType: recordType)
+                    Log.sync.info("\(label): retry succeeded (\(records.count) records) — \(response.status)")
+                    await syncLedger.recordSync(
+                        recordType: recordType,
+                        recordCount: records.count,
+                        httpStatusCode: 200,
+                        ndjsonPayload: ndjsonString,
+                        requestHeaders: headers
+                    )
+                    return .success
+                } catch let retryError as APIError {
+                    // Check auth error on retry too
+                    if case .httpError(let statusCode) = retryError, statusCode == 401 || statusCode == 403 {
+                        Log.sync.error("\(label): authentication error on retry (\(statusCode))")
+                        return .authError
+                    }
+                    Log.sync.error("\(label): retry failed (\(records.count) records) — \(retryError.localizedDescription)")
+                    return .failure
+                } catch {
+                    Log.sync.error("\(label): retry failed (\(records.count) records) — \(error.localizedDescription)")
+                    return .failure
+                }
+            }
+            
+            Log.sync.error("\(label): non-retryable error (\(records.count) records) — \(error.localizedDescription)")
+            return .failure
         } catch {
             Log.sync.error("\(label): non-retryable error (\(records.count) records) — \(error.localizedDescription)")
-            return false
+            return .failure
         }
     }
 
@@ -385,8 +454,11 @@ final class SyncCoordinator: ObservableObject {
 
             guard !mapped.isEmpty else { return 0 }
 
-            let posted = await postBatchWithRetry(mapped, recordType: "activity_summaries", label: "activity_summaries")
-            guard posted else { return 0 }
+            let postResult = await postBatchWithRetry(mapped, recordType: "activity_summaries", label: "activity_summaries")
+            if postResult == .authError {
+                return -1
+            }
+            guard postResult == .success else { return 0 }
 
             syncStateRepository.saveLastSyncDate(endDate, for: syncKey)
             return mapped.count
