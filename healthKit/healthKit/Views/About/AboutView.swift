@@ -971,7 +971,10 @@ struct AboutView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .dbxCard()
         .task {
-            // Check for expired deletions on view appear
+            // Wire the HealthKitManager so the internal 60s timer can fire
+            // deletions even when this tab isn't visible, then run the
+            // on-appear catch-up check.
+            demoModeManager.attach(healthStore: healthKitManager)
             await demoModeManager.checkScheduledDeletions(healthStore: healthKitManager)
         }
     }

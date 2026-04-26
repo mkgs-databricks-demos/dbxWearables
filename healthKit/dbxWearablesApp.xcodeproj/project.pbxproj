@@ -89,6 +89,7 @@
 		A1B2C3D40000000000000001 /* WorkspaceConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000002 /* WorkspaceConfig.swift */; };
 		A1B2C3D40000000000000003 /* WorkspaceConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000004 /* WorkspaceConfigTests.swift */; };
 		A1B2C3D40000000000000005 /* AppleSignInManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000006 /* AppleSignInManagerTests.swift */; };
+		A1B2C3D40000000000000007 /* DemoModeManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000008 /* DemoModeManagerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -194,6 +195,7 @@
 		A1B2C3D40000000000000002 /* WorkspaceConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceConfig.swift; sourceTree = "<group>"; };
 		A1B2C3D40000000000000004 /* WorkspaceConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceConfigTests.swift; sourceTree = "<group>"; };
 		A1B2C3D40000000000000006 /* AppleSignInManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInManagerTests.swift; sourceTree = "<group>"; };
+		A1B2C3D40000000000000008 /* DemoModeManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoModeManagerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -454,6 +456,7 @@
 				30E02528017DBCF3A839E700 /* APIServiceTests.swift */,
 				A1B2C3D40000000000000006 /* AppleSignInManagerTests.swift */,
 				89C4F22A64DD1E11ED6AB97D /* AuthServiceTests.swift */,
+				A1B2C3D40000000000000008 /* DemoModeManagerTests.swift */,
 				2F393872EFF0517F3F8E6CBD /* HealthSampleMapperTests.swift */,
 				2C97F568D0D1D9A7CF94AAD6 /* NDJSONSerializerTests.swift */,
 				98E44EDA0C1626F60C6FEFB4 /* SleepMapperTests.swift */,
@@ -630,6 +633,7 @@
 				E516E65CA22DC0DDF5D045A1 /* ActivitySummaryMapperTests.swift in Sources */,
 				A1B2C3D40000000000000005 /* AppleSignInManagerTests.swift in Sources */,
 				07DFD223D570919BFDEAA8C4 /* AuthServiceTests.swift in Sources */,
+				A1B2C3D40000000000000007 /* DemoModeManagerTests.swift in Sources */,
 				68E9EF5CDD0DD4F5A6FF99ED /* DeletionRecordTests.swift in Sources */,
 				D182BF610BDDDA3C40E8725B /* HealthSampleMapperTests.swift in Sources */,
 				382CDE72A1AD069DCF876E60 /* MockAPIService.swift in Sources */,
