@@ -86,6 +86,8 @@
 		F8EC68682DB640DCB8FB539B /* NDJSONSerializerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C97F568D0D1D9A7CF94AAD6 /* NDJSONSerializerTests.swift */; };
 		FBE13AAA5A0730612AA55D8F /* DataFlowDiagramView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6541C1C01BE4D815B50FD43E /* DataFlowDiagramView.swift */; };
 		FD0B59DD5642BE88458893DD /* SyncLedger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 880FCBB261A8729153A8D0A3 /* SyncLedger.swift */; };
+		A1B2C3D40000000000000001 /* WorkspaceConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000002 /* WorkspaceConfig.swift */; };
+		A1B2C3D40000000000000003 /* WorkspaceConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000004 /* WorkspaceConfigTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -188,6 +190,8 @@
 		F1A8DB7F7F1C9A1A4604648E /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		F34E82891476B1380F5DB270 /* SyncLedgerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncLedgerTests.swift; sourceTree = "<group>"; };
 		F3A23CB44A42ED967C70BD6F /* dbxWearablesApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = dbxWearablesApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1B2C3D40000000000000002 /* WorkspaceConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceConfig.swift; sourceTree = "<group>"; };
+		A1B2C3D40000000000000004 /* WorkspaceConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceConfigTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -330,6 +334,7 @@
 				D601FF122F9E22DA0085B0A5 /* DemoMode.swift */,
 				D601FF142F9E365C0085B0A5 /* AppleSignInManager.swift */,
 				D601FF162F9E36860085B0A5 /* SignInWithAppleView.swift */,
+				A1B2C3D40000000000000002 /* WorkspaceConfig.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -452,6 +457,7 @@
 				5E77957F551BBE1FA552A440 /* SyncCoordinatorTests.swift */,
 				F34E82891476B1380F5DB270 /* SyncLedgerTests.swift */,
 				E429996675DB963BA4CB2C4F /* WorkoutMapperTests.swift */,
+				A1B2C3D40000000000000004 /* WorkspaceConfigTests.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -632,6 +638,7 @@
 				A315330B316FD82CBF175ECD /* SyncLedgerTests.swift in Sources */,
 				8CDBC032AA26980FCFC05A7D /* SyncStatusTests.swift in Sources */,
 				3E73281F7C78B769CEEF7C4F /* WorkoutMapperTests.swift in Sources */,
+				A1B2C3D40000000000000003 /* WorkspaceConfigTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -707,6 +714,7 @@
 				D40CD3546532B7D23780375F /* TestResultsView.swift in Sources */,
 				5E4BAED0AC96DB0D31CB3033 /* WorkoutMapper.swift in Sources */,
 				9BA554890E77D12912991626 /* WorkoutRecord.swift in Sources */,
+				A1B2C3D40000000000000001 /* WorkspaceConfig.swift in Sources */,
 				2CB7458E8ABC836A71DE7809 /* dbxWearablesApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

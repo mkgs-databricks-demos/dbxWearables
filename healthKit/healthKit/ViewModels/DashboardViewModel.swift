@@ -24,7 +24,7 @@ final class DashboardViewModel: ObservableObject {
     }
     
     private func checkEndpointConfiguration() {
-        isEndpointConfigured = ProcessInfo.processInfo.environment["DBX_API_BASE_URL"] != nil
+        isEndpointConfigured = APIConfiguration.configuredBaseURL != nil
     }
 
     func requestAuthorization() async {

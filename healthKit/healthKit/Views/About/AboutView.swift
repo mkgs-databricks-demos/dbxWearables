@@ -912,7 +912,13 @@ struct AboutView: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader("Settings")
 
-            settingRow("API Endpoint", value: ProcessInfo.processInfo.environment["DBX_API_BASE_URL"] ?? "(not configured)")
+            settingRow("API Endpoint", value: APIConfiguration.configuredBaseURL?.absoluteString ?? "(not configured)")
+            if let host = APIConfiguration.configuredWorkspaceHost {
+                settingRow("Workspace Host", value: host.absoluteString)
+            }
+            if let label = WorkspaceConfig.label, !label.isEmpty {
+                settingRow("Workspace", value: label)
+            }
             settingRow("Device ID", value: DeviceIdentifier.current)
             settingRow("App Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0")
         }

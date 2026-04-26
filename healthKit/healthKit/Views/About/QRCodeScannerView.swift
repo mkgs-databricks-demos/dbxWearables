@@ -1,20 +1,24 @@
 import SwiftUI
 import AVFoundation
 
-/// QR code scanner for importing Databricks service principal credentials.
+/// QR code scanner for importing Databricks workspace coordinates and
+/// service-principal credentials in a single scan.
 ///
-/// Expected QR code format (JSON):
+/// Expected QR code format (JSON). Workspace URL fields are optional — if
+/// omitted, the currently-configured workspace stays in place and only the
+/// SPN credentials are updated:
 /// ```json
 /// {
 ///   "client_id": "abc123-def456-ghi789",
-///   "client_secret": "dapi..."
+///   "client_secret": "dapi...",
+///   "api_base_url": "https://<ws>.databricksapps.com/<app>",
+///   "workspace_host": "https://<ws>.cloud.databricks.com",
+///   "workspace_label": "Field Eng Demo"
 /// }
 /// ```
-///
-/// The QR code should contain a JSON object with `client_id` and `client_secret` keys.
 struct QRCodeScannerView: View {
     @Environment(\.dismiss) private var dismiss
-    let onScan: (String, String) -> Void
+    let onScan: (ScanResult) -> Void
     
     @StateObject private var scanner = QRCodeScanner()
     @State private var showError = false
@@ -185,9 +189,9 @@ struct QRCodeScannerView: View {
     private func handleScan(_ result: Result<ScanResult, ScanError>) {
         switch result {
         case .success(let scanResult):
-            onScan(scanResult.clientID, scanResult.clientSecret)
+            onScan(scanResult)
             dismiss()
-            
+
         case .failure(let error):
             errorMessage = error.userMessage
             showError = true
@@ -300,20 +304,43 @@ extension QRCodeScanner: AVCaptureMetadataOutputObjectsDelegate {
         do {
             let decoder = JSONDecoder()
             let credentials = try decoder.decode(QRCredentials.self, from: data)
-            
+
             guard !credentials.client_id.isEmpty else {
                 completionHandler?(.failure(.missingClientID))
                 return
             }
-            
+
             guard !credentials.client_secret.isEmpty else {
                 completionHandler?(.failure(.missingClientSecret))
                 return
             }
-            
+
+            // Workspace URLs are optional. If either is present, both must
+            // parse — partial workspace overrides aren't useful and lead to
+            // confusing half-switched state.
+            var apiBaseURL: URL?
+            var workspaceHost: URL?
+            if credentials.api_base_url != nil || credentials.workspace_host != nil {
+                guard let raw = credentials.api_base_url,
+                      let parsed = WorkspaceConfig.validatedURL(from: raw) else {
+                    completionHandler?(.failure(.invalidWorkspaceURL))
+                    return
+                }
+                guard let rawHost = credentials.workspace_host,
+                      let parsedHost = WorkspaceConfig.validatedURL(from: rawHost) else {
+                    completionHandler?(.failure(.invalidWorkspaceURL))
+                    return
+                }
+                apiBaseURL = parsed
+                workspaceHost = parsedHost
+            }
+
             completionHandler?(.success(ScanResult(
                 clientID: credentials.client_id,
-                clientSecret: credentials.client_secret
+                clientSecret: credentials.client_secret,
+                apiBaseURL: apiBaseURL,
+                workspaceHost: workspaceHost,
+                workspaceLabel: credentials.workspace_label
             )))
         } catch {
             completionHandler?(.failure(.invalidFormat))
@@ -349,11 +376,20 @@ struct QRCodeCameraView: UIViewRepresentable {
 struct QRCredentials: Codable {
     let client_id: String
     let client_secret: String
+    let api_base_url: String?
+    let workspace_host: String?
+    let workspace_label: String?
 }
 
 struct ScanResult {
     let clientID: String
     let clientSecret: String
+    /// Optional. If present, the scan switches the active workspace.
+    let apiBaseURL: URL?
+    /// Optional. Always set in tandem with `apiBaseURL`.
+    let workspaceHost: URL?
+    /// Optional human-readable label (e.g. "Field Eng Demo").
+    let workspaceLabel: String?
 }
 
 enum ScanError: Error {
@@ -363,7 +399,8 @@ enum ScanError: Error {
     case invalidFormat
     case missingClientID
     case missingClientSecret
-    
+    case invalidWorkspaceURL
+
     var userMessage: String {
         switch self {
         case .cameraUnavailable:
@@ -378,6 +415,8 @@ enum ScanError: Error {
             return "QR code is missing client_id field."
         case .missingClientSecret:
             return "QR code is missing client_secret field."
+        case .invalidWorkspaceURL:
+            return "QR code workspace URLs are invalid. Both api_base_url and workspace_host must be valid http(s) URLs."
         }
     }
 }

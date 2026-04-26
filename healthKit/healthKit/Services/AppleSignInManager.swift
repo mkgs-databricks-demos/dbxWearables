@@ -43,14 +43,11 @@ final class AppleSignInManager: NSObject, ObservableObject {
     }
     
     private let authService: AuthProviding
-    private let apiConfiguration: DatabricksAPIConfiguration
-    
-    init(authService: AuthProviding = AuthService(),
-         apiConfiguration: DatabricksAPIConfiguration = .production) {
+
+    init(authService: AuthProviding = AuthService()) {
         self.authService = authService
-        self.apiConfiguration = apiConfiguration
         super.init()
-        
+
         // Restore previous session if available
         restoreSession()
     }
@@ -108,9 +105,10 @@ final class AppleSignInManager: NSObject, ObservableObject {
             throw AppleAuthError.invalidAppleToken
         }
         
-        // Build request to Databricks JWT endpoint
-        let url = apiConfiguration.jwtExchangeEndpoint
-        
+        // Build request to Databricks JWT endpoint (resolved from runtime
+        // workspace config or DBX_API_BASE_URL env var).
+        let url = APIConfiguration.jwtExchangeURL
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -282,18 +280,6 @@ struct JWTExchangeResponse: Codable {
     let jwt: String
     let expiresIn: Int
     let userId: String
-}
-
-// MARK: - Configuration
-
-struct DatabricksAPIConfiguration {
-    let jwtExchangeEndpoint: URL
-    
-    static var production: DatabricksAPIConfiguration {
-        let baseURL = ProcessInfo.processInfo.environment["DBX_API_BASE_URL"] ?? ""
-        let url = URL(string: baseURL)!.appendingPathComponent("/api/v1/auth/apple/exchange")
-        return DatabricksAPIConfiguration(jwtExchangeEndpoint: url)
-    }
 }
 
 // MARK: - Errors

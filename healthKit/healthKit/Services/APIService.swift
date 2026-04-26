@@ -48,7 +48,7 @@ final class APIService {
     /// On HTTP 401, the cached token is invalidated and the request is retried once
     /// with a freshly minted bearer token. This handles server-side token revocation.
     func postRecords<T: Encodable>(_ records: [T], recordType: String) async throws -> APIResponse {
-        let url = APIConfiguration.baseURL.appendingPathComponent(APIConfiguration.ingestPath)
+        let url = APIConfiguration.ingestURL
         let body = try NDJSONSerializer.encode(records)
 
         do {
