@@ -51,9 +51,10 @@ CLUSTER BY AUTO
 COMMENT 'Bronze table for wearable health data ingested via Databricks ZeroBus with VARIANT JSON storage'
 TBLPROPERTIES (
   'delta.enableChangeDataFeed' = 'true',
-  'delta.feature.variantType-preview' = 'supported',
-  'delta.minReaderVersion' = '3',
-  'delta.minWriterVersion' = '7',
+  'delta.enableDeletionVectors' = 'true',
+  'delta.enableRowTracking' = 'true',
+  -- 'delta.enableTypeWidening' = 'true',
+  'delta.enableVariantShredding' = 'true',
   'quality' = 'bronze',
   'pipeline' = 'dbxw_zerobus',
   'description' = 'ZeroBus streaming target table for wearable health data'

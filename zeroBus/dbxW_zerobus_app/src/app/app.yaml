@@ -20,13 +20,16 @@
 #   OTEL_BLRP_SCHEDULE_DELAY     — 1000ms
 #
 # Custom env vars (from secret scope + postgres resource):
-#   LAKEBASE_ENDPOINT         — Lakebase endpoint path (from postgres resource)
-#   ZEROBUS_CLIENT_ID         — ZeroBus SPN application_id
-#   ZEROBUS_CLIENT_SECRET     — ZeroBus SPN OAuth secret
-#   ZEROBUS_WORKSPACE_URL     — Databricks workspace URL for SDK calls
-#   ZEROBUS_ENDPOINT          — ZeroBus Ingest server endpoint
-#   ZEROBUS_TARGET_TABLE      — Fully qualified bronze table name
-#   ZEROBUS_STREAM_POOL_SIZE  — SDK gRPC stream pool size (per-target via bundle var)
+#   LAKEBASE_ENDPOINT            — Lakebase endpoint path (from postgres resource)
+#   ZEROBUS_CLIENT_ID            — ZeroBus SPN application_id
+#   ZEROBUS_CLIENT_SECRET        — ZeroBus SPN OAuth secret
+#   ZEROBUS_WORKSPACE_URL        — Databricks workspace URL for SDK calls
+#   ZEROBUS_ENDPOINT             — ZeroBus Ingest server endpoint
+#   ZEROBUS_TARGET_TABLE         — Fully qualified bronze table name
+#   ZEROBUS_STREAM_POOL_SIZE     — SDK gRPC stream pool size (per-target via bundle var)
+#   JWT_SIGNING_SECRET           — HS256 signing key for app-issued JWTs
+#   APPLE_BUNDLE_ID              — iOS app bundle identifier for Apple token validation
+#   IOS_SPN_APPLICATION_ID       — iOS bootstrap SPN application_id for route guard
 
 command: ['npm', 'run', 'start']
 env:
@@ -57,3 +60,35 @@ env:
   # The service defaults to 4 if this env var is unset or the scope key is missing.
   - name: ZEROBUS_STREAM_POOL_SIZE
     valueFrom: zerobus-stream-pool-size
+
+  # JWT Authentication — Sign in with Apple (Phase 1)
+  # See server/services/auth-service.ts for usage.
+  # Graceful degradation: if not set, auth endpoints return 503 but the
+  # rest of the app (ZeroBus ingest, Lakebase, admin UI) works normally.
+
+  # HS256 signing key for app-issued JWTs (access tokens).
+  # Generate with: openssl rand -base64 32
+  # Provision with: databricks secrets put-secret dbxw_zerobus_credentials jwt_signing_secret --string-value "<key>"
+  - name: JWT_SIGNING_SECRET
+    valueFrom: jwt-signing-secret
+
+  # iOS app bundle identifier — used as the `aud` claim when validating
+  # Apple identity tokens. Must match the bundle ID in the Xcode project.
+  # Provision with: databricks secrets put-secret dbxw_zerobus_credentials apple_bundle_id --string-value "<bundle-id>"
+  - name: APPLE_BUNDLE_ID
+    valueFrom: apple-bundle-id
+
+  # Auth Hardening — iOS Bootstrap SPN Route Guard
+  # See server/middleware/spn-route-guard.ts for usage.
+  #
+  # The application_id of the dedicated iOS bootstrap SPN. The route guard
+  # uses this to verify the SPN's identity and restrict it to auth routes
+  # only (no access to ingest, Lakebase, or admin routes).
+  #
+  # Graceful degradation: if not set, the route guard still restricts all
+  # non-user proxy-authenticated callers to auth routes, but cannot verify
+  # whether the caller is the intended iOS SPN vs. an unknown SPN.
+  #
+  # Provision with: databricks secrets put-secret dbxw_zerobus_credentials ios_spn_application_id --string-value "<app-id-uuid>"
+  - name: IOS_SPN_APPLICATION_ID
+    valueFrom: ios-spn-application-id
