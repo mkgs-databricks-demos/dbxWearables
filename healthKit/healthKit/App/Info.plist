@@ -41,6 +41,8 @@
     <string>dbxWearables reads your activity, heart rate, sleep, and workout data to sync with your Databricks health dashboard.</string>
     <key>NSHealthUpdateUsageDescription</key>
     <string>dbxWearables does not write health data.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>Camera access is required to scan QR codes containing Databricks service principal credentials for quick app configuration.</string>
     <key>UIBackgroundModes</key>
     <array>
         <string>processing</string>
