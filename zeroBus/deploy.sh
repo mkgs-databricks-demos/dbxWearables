@@ -5,7 +5,7 @@
 #   1. dbxW_zerobus_infra  (secret scopes, UC schemas, SQL warehouses, Lakebase)
 #   2. UC setup job        (SPN creation, secret provisioning, table DDL)
 #   3. Readiness checks    (all secret scope keys + bronze table + Lakebase status)
-#   4. dbxW_zerobus        (AppKit app, pipelines, jobs) — when available
+#   4. dbxW_zerobus_app    (AppKit app, pipelines, jobs)
 #
 # Usage:
 #   ./deploy.sh --target dev                          # deploy all bundles (with readiness checks)
@@ -18,12 +18,18 @@
 #   ./deploy.sh --target dev --destroy                # destroy deployed resources
 #
 # Infrastructure Readiness Checks (gate before app bundle deploy):
-#   Secret scope keys — all 5 must be present:
-#     Auto-provisioned:  {client_id_dbs_key}, workspace_url, zerobus_endpoint, target_table_name
+#   Secret scope keys — all 8 must be present:
+#     Auto-provisioned:  {client_id_dbs_key}, workspace_url, zerobus_endpoint, target_table_name,
+#                        jwt_signing_secret, apple_bundle_id, ios_spn_application_id
 #     Admin-provisioned: {client_secret_dbs_key}
 #   Key names are schema-qualified in dev/hls_fde targets (e.g. client_id_wearables).
 #   Bronze table — wearables_zerobus must exist in the target catalog.schema
 #   Lakebase project — informational; notes Data API status (optional, not required for AppKit)
+#
+# iOS Bootstrap SPN permissions:
+#   After readiness checks pass, deploy.sh reads the iOS SPN application_id
+#   from the secret scope and passes it as --var ios_bootstrap_spn_id=<value>
+#   to the app bundle deploy. This grants CAN_USE on the app declaratively.
 #
 # Requirements:
 #   - Databricks CLI installed and authenticated (databricks auth login)
@@ -36,7 +42,7 @@ set -euo pipefail
 # --------------------------------------------------------------------------- #
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INFRA_BUNDLE="dbxW_zerobus_infra"
-APP_BUNDLE="dbxW_zerobus"
+APP_BUNDLE="dbxW_zerobus_app"
 
 # Infrastructure readiness — expected secret scope keys.
 # The client_id and client_secret key names are schema-qualified and resolved
@@ -55,7 +61,12 @@ CATALOG=""
 SCHEMA=""
 CLIENT_ID_DBS_KEY=""
 CLIENT_SECRET_DBS_KEY=""
+IOS_BOOTSTRAP_CLIENT_SECRET_KEY=""
 LAKEBASE_PROJECT_ID=""
+
+# Resolved at runtime after readiness checks — iOS SPN application_id
+# for the app bundle's permissions block (passed via --var override).
+IOS_BOOTSTRAP_SPN_ID=""
 
 # --------------------------------------------------------------------------- #
 # Defaults
@@ -137,9 +148,14 @@ command -v python3    &>/dev/null || fail "python3 not found (required for JSON 
 
 # --------------------------------------------------------------------------- #
 # deploy_bundle — validate and deploy (or destroy) a single bundle
+#
+# Usage: deploy_bundle <bundle_name> [extra_deploy_args...]
+#   Extra args (e.g. --var key=value) are passed to `bundle deploy` only.
 # --------------------------------------------------------------------------- #
 deploy_bundle() {
   local bundle_name="$1"
+  shift
+  local extra_args=("$@")
   local bundle_dir="${SCRIPT_DIR}/${bundle_name}"
 
   if [[ ! -d "${bundle_dir}" ]]; then
@@ -166,7 +182,11 @@ deploy_bundle() {
     ok "Destroyed: ${bundle_name}"
   else
     log "Deploying ${bundle_name} (target: ${TARGET})"
-    (cd "${bundle_dir}" && databricks bundle deploy --target "${TARGET}")
+    if [[ ${#extra_args[@]} -gt 0 ]]; then
+      (cd "${bundle_dir}" && databricks bundle deploy --target "${TARGET}" "${extra_args[@]}")
+    else
+      (cd "${bundle_dir}" && databricks bundle deploy --target "${TARGET}")
+    fi
     ok "Deployed: ${bundle_name}"
   fi
 }
@@ -248,6 +268,11 @@ print(f'CATALOG=\"{safe(catalog)}\"')
 print(f'SCHEMA=\"{safe(schema)}\"')
 print(f'CLIENT_ID_DBS_KEY=\"{safe(client_id_key)}\"')
 print(f'CLIENT_SECRET_DBS_KEY=\"{safe(client_secret_key)}\"')
+
+# iOS bootstrap SPN client secret key (schema-qualified)
+ios_bootstrap_secret_key = variables.get('ios_bootstrap_client_secret_key', {})
+ios_bootstrap_secret_key = ios_bootstrap_secret_key.get('value', ios_bootstrap_secret_key.get('default', 'ios_bootstrap_client_secret'))
+print(f'IOS_BOOTSTRAP_CLIENT_SECRET_KEY=\"{safe(ios_bootstrap_secret_key)}\"')
 print(f'LAKEBASE_PROJECT_ID=\"{safe(project_id)}\"')
 " 2>/dev/null)" || fail "Could not parse bundle summary JSON."
 
@@ -267,6 +292,7 @@ print(f'LAKEBASE_PROJECT_ID=\"{safe(project_id)}\"')
   ok "Schema:              ${SCHEMA}"
   ok "Client ID key:       ${CLIENT_ID_DBS_KEY}"
   ok "Client secret key:   ${CLIENT_SECRET_DBS_KEY}"
+  ok "iOS SPN secret key: ${IOS_BOOTSTRAP_CLIENT_SECRET_KEY}"
 
   if [[ -n "${LAKEBASE_PROJECT_ID}" ]]; then
     ok "Lakebase project:    ${LAKEBASE_PROJECT_ID}"
@@ -280,11 +306,13 @@ print(f'LAKEBASE_PROJECT_ID=\"{safe(project_id)}\"')
 
 # --------------------------------------------------------------------------- #
 # build_key_arrays — populate REQUIRED / AUTO / ADMIN key arrays from the
-#                    resolved client_id_dbs_key and client_secret_dbs_key
+#                    resolved client_id_dbs_key and client_secret_dbs_key.
+#                    Auth keys (jwt_signing_secret, apple_bundle_id,
+#                    ios_spn_application_id) use fixed names (not schema-qualified).
 # --------------------------------------------------------------------------- #
 build_key_arrays() {
-  AUTO_PROVISIONED_KEYS=("${CLIENT_ID_DBS_KEY}" workspace_url zerobus_endpoint target_table_name)
-  ADMIN_PROVISIONED_KEYS=("${CLIENT_SECRET_DBS_KEY}")
+  AUTO_PROVISIONED_KEYS=("${CLIENT_ID_DBS_KEY}" workspace_url zerobus_endpoint target_table_name jwt_signing_secret apple_bundle_id ios_spn_application_id)
+  ADMIN_PROVISIONED_KEYS=("${CLIENT_SECRET_DBS_KEY}" "${IOS_BOOTSTRAP_CLIENT_SECRET_KEY}")
   REQUIRED_SCOPE_KEYS=("${AUTO_PROVISIONED_KEYS[@]}" "${ADMIN_PROVISIONED_KEYS[@]}")
 }
 
@@ -327,7 +355,7 @@ check_lakebase_status() {
 
   # Verify the project is accessible
   local project_json
-  project_json=$(databricks postgres get-project "${project_id}" --output json 2>&1) || {
+  project_json=$(databricks postgres get-project "projects/${project_id}" --output json 2>/dev/null) || {
     warn "Lakebase project '${project_id}' not found or not accessible."
     warn "If the project was just created, it may still be initializing."
     return 0
@@ -336,7 +364,7 @@ check_lakebase_status() {
 
   # List endpoints on the production branch
   local endpoints_json
-  endpoints_json=$(databricks postgres list-endpoints "projects/${project_id}/branches/production" --output json 2>&1) || {
+  endpoints_json=$(databricks postgres list-endpoints "projects/${project_id}/branches/production" --output json 2>/dev/null) || {
     warn "Could not list endpoints for project '${project_id}' branch 'production'."
     warn "The branch or endpoint may still be initializing."
     return 0
@@ -393,10 +421,32 @@ print('unknown')
 }
 
 # --------------------------------------------------------------------------- #
+# read_ios_spn_id — read the iOS Bootstrap SPN application_id from the
+#                   secret scope. Used as --var override for the app bundle's
+#                   permissions block (grants CAN_USE on the app).
+#
+# Sets IOS_BOOTSTRAP_SPN_ID global variable. Non-fatal — warns on failure.
+# --------------------------------------------------------------------------- #
+read_ios_spn_id() {
+  log "Reading iOS Bootstrap SPN application_id from secret scope"
+
+  IOS_BOOTSTRAP_SPN_ID=$(databricks secrets get-secret "${SCOPE_NAME}" ios_spn_application_id --output json 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('value',''))" 2>/dev/null) || IOS_BOOTSTRAP_SPN_ID=""
+
+  if [[ -n "${IOS_BOOTSTRAP_SPN_ID}" ]]; then
+    ok "iOS Bootstrap SPN ID: ${IOS_BOOTSTRAP_SPN_ID:0:8}..."
+  else
+    warn "Could not read iOS Bootstrap SPN application_id from scope."
+    warn "App bundle permissions will not include the iOS SPN grant."
+    warn "The app will still deploy, but the iOS SPN won't have CAN_USE."
+  fi
+}
+
+# --------------------------------------------------------------------------- #
 # verify_infra_readiness — gate check before app bundle deployment
 #
 # Checks:
-#   1. Secret scope exists and contains all 5 required keys
+#   1. Secret scope exists and contains all 8 required keys
 #      (key names are schema-qualified, resolved from bundle variables)
 #   2. Bronze table wearables_zerobus exists in catalog.schema
 #   3. Lakebase project status (informational — does not block deploy)
@@ -413,8 +463,9 @@ verify_infra_readiness() {
   local check_failed=false
 
   # ---- 1. Secret scope keys -----------------------------------------------
+  # NOTE: CLI uses positional arg for scope, not --scope flag
   local secrets_json
-  secrets_json=$(databricks secrets list-secrets --scope "${SCOPE_NAME}" --output json 2>&1) || {
+  secrets_json=$(databricks secrets list-secrets "${SCOPE_NAME}" --output json 2>/dev/null) || {
     echo ""
     echo "  Secret scope '${SCOPE_NAME}' not found or not accessible."
     echo "  The UC setup job must run first to create the SPN and populate secrets:"
@@ -430,8 +481,11 @@ verify_infra_readiness() {
   present_keys=$(echo "${secrets_json}" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
-for s in data.get('secrets', []):
-    print(s.get('key', ''))
+# Handle both {"secrets": [...]} (old CLI) and direct array [...] (new CLI)
+items = data.get('secrets', data) if isinstance(data, dict) else data
+for s in items:
+    if isinstance(s, dict):
+        print(s.get('key', ''))
 " 2>/dev/null) || fail "Could not parse secrets list from scope '${SCOPE_NAME}'."
 
   local missing_auto=()
@@ -507,9 +561,7 @@ for s in data.get('secrets', []):
     echo "     • Databricks CLI: databricks account service-principal-secrets create <sp_id>"
     echo ""
     echo "  2. Store it in the secret scope:"
-    echo "     databricks secrets put-secret \\"
-    echo "       --scope ${SCOPE_NAME} \\"
-    echo "       --key ${CLIENT_SECRET_DBS_KEY} \\"
+    echo "     databricks secrets put-secret ${SCOPE_NAME} ${CLIENT_SECRET_DBS_KEY} \\"
     echo '       --string-value "<secret>"'
     echo ""
     echo "  Use --skip-checks to deploy the app bundle without this key."
@@ -547,11 +599,19 @@ fi
 if [[ "${DEPLOY_APP}" == true ]] && [[ "${SKIP_CHECKS}" != true ]] && [[ "${VALIDATE_ONLY}" != true ]] && [[ "${DESTROY}" != true ]]; then
   resolve_infra_vars
   verify_infra_readiness
+  # Read iOS Bootstrap SPN application_id for app bundle permissions
+  read_ios_spn_id
 fi
 
 # Step 4: Deploy app bundle
+# If IOS_BOOTSTRAP_SPN_ID was resolved, pass it as --var so the app bundle's
+# permissions block can grant CAN_USE to the iOS SPN declaratively.
 if [[ "${DEPLOY_APP}" == true ]]; then
-  deploy_bundle "${APP_BUNDLE}"
+  if [[ -n "${IOS_BOOTSTRAP_SPN_ID}" ]]; then
+    deploy_bundle "${APP_BUNDLE}" --var "ios_bootstrap_spn_id=${IOS_BOOTSTRAP_SPN_ID}"
+  else
+    deploy_bundle "${APP_BUNDLE}"
+  fi
 fi
 
 log "Done."

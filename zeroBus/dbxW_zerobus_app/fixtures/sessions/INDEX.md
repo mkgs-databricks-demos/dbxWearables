@@ -2,6 +2,8 @@
 
 | Date | Session | File |
 | --- | --- | --- |
+| 2026-04-26 | deploy.sh CLI Fixes, iOS SPN Permissions & Deploy Readiness | [2026-04-26_deploy-cli-fixes-ios-spn-permissions.md](2026-04-26_deploy-cli-fixes-ios-spn-permissions.md) |
+| 2026-04-25 | JWT Authentication (Phase 1) & Security Hardening | [2026-04-25_jwt-auth-hardening.md](2026-04-25_jwt-auth-hardening.md) |
 | 2026-04-23 | Load Test History UX Refinements & Pool Size Bug Fix | [2026-04-23_load-test-history-ux-refinements.md](2026-04-23_load-test-history-ux-refinements.md) |
 | 2026-04-23 | Load Test History Implementation (Lakebase + Lakehouse Sync) | [2026-04-23_load-test-history-implementation.md](2026-04-23_load-test-history-implementation.md) |
 | 2026-04-22 | Frontend Auto-Scale Stale Reference Cleanup | [2026-04-22_frontend-autoscale-stale-references.md](2026-04-22_frontend-autoscale-stale-references.md) |

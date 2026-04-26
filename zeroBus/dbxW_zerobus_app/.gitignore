@@ -9,3 +9,7 @@ src/app/.env
 src/app/.smoke-test/
 src/app/test-results/
 src/app/playwright-report/
+
+# Web terminal FUSE ghost — the CLI sees a .bashrc in fixtures/ that
+# doesn't exist in the workspace API. Exclude to prevent upload errors.
+.bashrc

@@ -18,6 +18,10 @@
 #   Runtime:  command: ['npm', 'run', 'start'] (node dist/server.js)
 #
 # Authentication:
+#   Two-layer model:
+#     Layer 1 (User → App): Sign in with Apple → app-issued JWT (auth-service.ts)
+#     Layer 2 (App → Workspace): M2M OAuth SPN (platform-managed)
+#
 #   The app's auto-provisioned service principal reads ZeroBus SPN
 #   credentials (client_id, client_secret) from the infra bundle's
 #   secret scope. These are injected as environment variables via the
@@ -25,13 +29,25 @@
 #   (DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET) is injected by the
 #   platform — the secret scope credentials are for ZeroBus specifically.
 #
+#   Mobile users authenticate via Sign in with Apple. The server validates
+#   the Apple identity token, registers the user in Lakebase, and issues
+#   a short-lived app JWT (HS256, 15 min) + refresh token (30 days).
+#   The JWT's `sub` claim (Lakebase user_id UUID) is written to the bronze
+#   table's user_id column for per-user data attribution.
+#
+#   Auth hardening: a route guard (spn-route-guard.ts) restricts the iOS
+#   bootstrap SPN to auth routes only. Rate limiters throttle auth endpoints.
+#
 # Secret scope keys (schema-qualified in dev/hls_fde):
-#   {client_id_dbs_key}     — ZeroBus SPN application_id
-#   {client_secret_dbs_key} — ZeroBus SPN OAuth secret (admin-provisioned)
-#   workspace_url           — Databricks workspace URL
-#   zerobus_endpoint        — ZeroBus Ingest server endpoint
-#   target_table_name       — Fully qualified bronze table name
-#   zerobus_stream_pool_size — SDK gRPC stream pool size (non-sensitive config)
+#   {client_id_dbs_key}       — ZeroBus SPN application_id
+#   {client_secret_dbs_key}   — ZeroBus SPN OAuth secret (admin-provisioned)
+#   workspace_url             — Databricks workspace URL
+#   zerobus_endpoint          — ZeroBus Ingest server endpoint
+#   target_table_name         — Fully qualified bronze table name
+#   zerobus_stream_pool_size  — SDK gRPC stream pool size (non-sensitive config)
+#   jwt_signing_secret        — HS256 key for app-issued JWTs (Phase 1 auth)
+#   apple_bundle_id           — iOS app bundle identifier for Apple token validation
+#   ios_spn_application_id    — iOS bootstrap SPN application_id for route guard
 #
 # Observability (Beta):
 #   App telemetry is enabled via telemetry_export_destinations. The
@@ -58,7 +74,8 @@ resources:
         payload + HTTP headers to the Unity Catalog bronze table
         (wearables_zerobus) via the @databricks/zerobus-ingest-sdk.
         Authenticates to ZeroBus using the dedicated SPN credentials
-        stored in the infra bundle's secret scope.
+        stored in the infra bundle's secret scope. Mobile users
+        authenticate via Sign in with Apple (app-issued JWT).
 
       source_code_path: ../src/app
 
@@ -146,14 +163,67 @@ resources:
         # ${var.zerobus_stream_pool_size}. The service falls back to a
         # default of 4 if the env var is unset or the key is missing.
         # Populate via: databricks secrets put-secret \
-        #   --scope dbxw_zerobus_credentials \
-        #   --key zerobus_stream_pool_size \
+        #   dbxw_zerobus_credentials zerobus_stream_pool_size \
         #   --string-value "${var.zerobus_stream_pool_size}"
         - name: zerobus-stream-pool-size
           description: Number of concurrent gRPC streams in the ZeroBus SDK stream pool
           secret:
             scope: ${var.secret_scope_name}
             key: zerobus_stream_pool_size
+            permission: READ
+
+        # ── JWT Authentication (Phase 1) ─────────────────────────────
+        #
+        # App-managed JWT auth for mobile clients (Sign in with Apple).
+        # See server/services/auth-service.ts for usage.
+        #
+        # Graceful degradation: if these keys are not provisioned in the
+        # secret scope, the auth service stays uninitialized and auth
+        # endpoints return 503. The rest of the app works normally.
+
+        # HS256 signing key for app-issued JWTs (access tokens).
+        # Generate: openssl rand -base64 32
+        # Provision: databricks secrets put-secret \
+        #   dbxw_zerobus_credentials jwt_signing_secret \
+        #   --string-value "<key>"
+        - name: jwt-signing-secret
+          description: HS256 signing key for app-issued JWTs (auth service)
+          secret:
+            scope: ${var.secret_scope_name}
+            key: ${var.jwt_signing_secret_key}
+            permission: READ
+
+        # iOS app bundle identifier for Apple identity token validation.
+        # The `aud` claim in Apple's identity JWT must match this value.
+        # Non-sensitive but stored in secret scope for per-target control.
+        # Provision: databricks secrets put-secret \
+        #   dbxw_zerobus_credentials apple_bundle_id \
+        #   --string-value "com.dbxwearables.healthKit"
+        - name: apple-bundle-id
+          description: iOS app bundle identifier for Apple identity token audience validation
+          secret:
+            scope: ${var.secret_scope_name}
+            key: ${var.apple_bundle_id_key}
+            permission: READ
+
+        # ── Auth Hardening — iOS Bootstrap SPN Route Guard ───────────
+        #
+        # The application_id of the dedicated iOS bootstrap SPN.
+        # Used by spn-route-guard.ts to verify the SPN's identity and
+        # restrict it to auth routes only (no ingest, Lakebase, or admin).
+        #
+        # Graceful degradation: if not provisioned, the route guard still
+        # restricts non-user proxy callers to auth routes, but cannot
+        # verify the specific SPN identity.
+        #
+        # Provision: databricks secrets put-secret \
+        #   dbxw_zerobus_credentials ios_spn_application_id \
+        #   --string-value "<spn-application-id-uuid>"
+        - name: ios-spn-application-id
+          description: iOS bootstrap SPN application_id for route guard identity verification
+          secret:
+            scope: ${var.secret_scope_name}
+            key: ${var.ios_spn_application_id_key}
             permission: READ
 
         # Lakebase Postgres — direct wire protocol (port 5432) via AppKit
@@ -173,6 +243,8 @@ resources:
           level: CAN_MANAGE
         - group_name: users
           level: CAN_USE
+        - service_principal_name: ${var.ios_bootstrap_spn_id}
+          level: CAN_USE
 
 # ---------------------------------------------------------------------------
 # Target-specific overrides
@@ -189,6 +261,9 @@ targets:
               level: CAN_MANAGE
             - group_name: users
               level: CAN_USE
+            - service_principal_name: ${var.ios_bootstrap_spn_id}
+              level: CAN_USE
+              
 
   hls_fde:
     resources:
@@ -202,6 +277,8 @@ targets:
               level: CAN_MANAGE
             - group_name: users
               level: CAN_USE
+            - service_principal_name: ${var.ios_bootstrap_spn_id}
+              level: CAN_USE
 
   prod:
     resources:
@@ -211,4 +288,6 @@ targets:
             - user_name: matthew.giglia@databricks.com
               level: CAN_MANAGE
             - group_name: users
+              level: CAN_USE
+            - service_principal_name: ${var.ios_bootstrap_spn_id}
               level: CAN_USE

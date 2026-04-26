@@ -44,6 +44,8 @@ The app is a **TypeScript/Node.js** project built with `@databricks/appkit` (Exp
                     │  AppKit App (src/app/)                            │
                     │                                                   │
   HealthKit POST ──►│  Express Server (server/server.ts)                │
+                    │    ├─ Route Guard → caller type + access matrix   │
+                    │    ├─ Auth routes → Sign in with Apple JWT        │
                     │    ├─ ZeroBus routes → SDK stream pool            │
                     │    │    └─ N gRPC streams → UC bronze table       │
                     │    └─ Lakebase routes → pg.Pool → Postgres        │
@@ -75,6 +77,150 @@ The server ingests wearable health data via the **ZeroBus Ingest SDK** (`@databr
 | `server/services/zerobus-service.ts` | Stream pool lifecycle: init, round-robin selection, graceful shutdown |
 | `server/routes/zerobus/ingest-routes.ts` | Express routes: POST per record type, health check with pool status |
 
+### JWT Authentication (Phase 1)
+
+Mobile users authenticate via **Sign in with Apple**. The server validates the Apple identity token, registers the user in Lakebase, and issues its own short-lived JWT. This is a **two-layer model**:
+
+| Layer | Direction | Mechanism | Status |
+| --- | --- | --- | --- |
+| User → App | Mobile client → AppKit server | App-issued JWT via Sign in with Apple | Phase 1 |
+| App → Workspace | AppKit server → Databricks | M2M OAuth SPN (platform-managed) | Active |
+
+**Why not Databricks-native user auth?** Onboarding each mobile app user as a Databricks workspace identity is not feasible. The app manages its own user registry in Lakebase and issues JWTs that carry the user identity into the data layer via the validated `sub` claim.
+
+#### Auth Endpoints
+
+| Method | Path | Auth | Rate Limit | Purpose |
+| --- | --- | --- | --- | --- |
+| POST | `/api/v1/auth/apple` | Public | 10 / 15 min / IP | Exchange Apple identity token for app JWT + refresh token |
+| POST | `/api/v1/auth/refresh` | Refresh token | 20 / 1 min / IP | Silent token renewal (implements rotation) |
+| POST | `/api/v1/auth/revoke` | Access JWT | 10 / 1 min / IP | Revoke refresh token (logout) |
+| GET | `/api/v1/auth/health` | Public | None | Auth subsystem health check |
+
+#### Token Lifecycle
+
+| Token | Lifetime | iOS Storage | Server Storage | Purpose |
+| --- | --- | --- | --- | --- |
+| Apple Identity Token | ~10 min | Transient | Not stored | Exchanged once during Sign in with Apple |
+| App Access JWT | 15 min | Keychain | Stateless (not stored) | Bearer token for all API calls — `sub` claim = user_id |
+| App Refresh Token | 30 days | Keychain | Lakebase (SHA-256 hash) | Silent token renewal without re-authentication |
+
+**JWT claims (access token):**
+
+```
+{
+  "sub":       "<user_id UUID from Lakebase auth.users>",
+  "device_id": "<X-Device-Id from iOS Keychain>",
+  "platform":  "apple_healthkit",
+  "iat":       <issued-at>,
+  "exp":       <iat + 900>    // 15 min
+}
+```
+
+Signed with HS256 using `JWT_SIGNING_SECRET` from the Databricks secret scope.
+
+#### Lakebase Auth Tables
+
+The auth service creates three tables in the `auth` schema on first startup (idempotent migration):
+
+| Table | Key | Purpose |
+| --- | --- | --- |
+| `auth.users` | `user_id` UUID (PK), `apple_sub` (UNIQUE) | One row per authenticated person |
+| `auth.devices` | `device_id` TEXT (PK) → `user_id` FK | Links device installs to users (multi-device) |
+| `auth.refresh_tokens` | `token_hash` TEXT (PK) → `user_id` + `device_id` FK | SHA-256 hashes, 30-day expiry, revocable |
+
+#### Graceful Degradation
+
+If `JWT_SIGNING_SECRET` is not provisioned in the secret scope, the auth service stays uninitialized and auth endpoints return 503. The rest of the app (ZeroBus ingest, Lakebase, admin UI) works normally. This allows deployment before auth secrets are provisioned.
+
+### Auth Hardening
+
+The authentication layer is hardened with three additional enforcement mechanisms: an SPN route guard, per-endpoint rate limiting, and a three-SPN architecture for iOS bootstrap.
+
+#### SPN Route Guard
+
+A global middleware (`spn-route-guard.ts`) runs on all `/api/*` routes **before** any route handlers. It identifies the caller type from proxy-injected headers and Bearer tokens, then enforces a route-zone access matrix.
+
+**Caller identification (priority order):**
+
+1. `Authorization: Bearer <token>` validates as app JWT → **app-jwt-user**
+2. `x-forwarded-email` contains `@` → **workspace-user** (proxy-authenticated)
+3. Proxy headers present + matches `IOS_SPN_APPLICATION_ID` → **ios-spn** (verified)
+4. Proxy headers present, no match → **proxy-unverified** (unknown SPN)
+5. No auth context → **anonymous**
+
+**Access control matrix:**
+
+| Caller Type | Auth Routes | Ingest Routes | Admin Routes | Health Routes |
+| --- | --- | --- | --- | --- |
+| workspace-user | Yes | Yes | Yes | Yes |
+| app-jwt-user | Yes | Yes | No | Yes |
+| ios-spn (verified) | Yes | No | No | Yes |
+| proxy-unverified | Yes | No | No | Yes |
+| anonymous | No | No | No | Yes |
+
+**Route zones:**
+- **health**: any path ending in `/health` (diagnostic, always open)
+- **auth**: `/api/v1/auth/*` (Sign in with Apple, refresh, revoke)
+- **ingest**: `/api/v1/healthkit/*` (HealthKit data ingestion)
+- **admin**: everything else under `/api/` (Lakebase, testing, load test)
+
+#### Rate Limiting
+
+In-memory sliding window rate limiters protect auth endpoints from abuse. Each endpoint has independent counters keyed on client IP (from `x-forwarded-for`).
+
+| Endpoint | Window | Max Requests | Rationale |
+| --- | --- | --- | --- |
+| POST `/api/v1/auth/apple` | 15 min | 10 | Bootstrap sign-in is infrequent (once per install) |
+| POST `/api/v1/auth/refresh` | 1 min | 20 | Handles multi-device simultaneous refresh |
+| POST `/api/v1/auth/revoke` | 1 min | 10 | Logout is infrequent |
+
+Standard headers are set on every response: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`. Over-limit responses include `Retry-After`.
+
+Designed for single-instance Databricks Apps (in-memory state). For multi-instance scaling, replace with Lakebase-backed counters (same interface).
+
+#### Three-SPN Architecture
+
+Three service principals serve distinct roles with minimal privilege:
+
+| SPN | Purpose | Permissions | Credential Location |
+| --- | --- | --- | --- |
+| App (auto-provisioned) | AppKit server operations | Broad (ZeroBus, UC, Lakebase) | Platform-injected |
+| ZeroBus SPN | gRPC streaming to bronze table | UC table write only | Secret scope → env vars |
+| iOS bootstrap SPN | Auth endpoint access for sign-in | CAN_USE on app resource ONLY | Embedded in iOS binary |
+
+The iOS bootstrap SPN solves a chicken-and-egg problem: the iOS app needs credentials to reach auth endpoints _before_ the user signs in with Apple. By dedicating an SPN with minimal permissions (CAN_USE only) and enforcing the route guard at the application layer, the blast radius of compromised iOS-embedded credentials is limited to the auth endpoints.
+
+**Provisioning the iOS bootstrap SPN:**
+
+```bash
+# 1. Create the SPN in your workspace
+databricks service-principals create --display-name "dbxw-ios-bootstrap" --active
+
+# 2. Grant CAN_USE on the app (from the Apps UI or via API)
+
+# 3. Generate an OAuth secret for the SPN
+
+# 4. Store the SPN's application_id in the secret scope
+databricks secrets put-secret dbxw_zerobus_credentials ios_spn_application_id \
+  --string-value "<spn-application-id-uuid>"
+
+# 5. Embed the SPN's OAuth credentials in the iOS app binary
+#    (client_id + client_secret for token endpoint)
+```
+
+**Implementation files:**
+
+| File | Purpose |
+| --- | --- |
+| `server/services/auth-service.ts` | Apple JWKS validation, JWT signing (HS256), Lakebase CRUD, refresh token rotation |
+| `server/middleware/jwt-auth.ts` | Express middleware: `requireAuth` (401) and `optionalAuth` (continue if missing) |
+| `server/middleware/spn-route-guard.ts` | Global middleware: caller identification + route-zone access matrix enforcement |
+| `server/middleware/rate-limit.ts` | In-memory sliding window rate limiter factory with standard headers |
+| `server/routes/auth/auth-routes.ts` | Four endpoints with per-endpoint rate limiters: apple exchange, refresh, revoke, health |
+
+**Library choice:** `jose` (ESM-native JWT library) instead of the planned `jsonwebtoken` + `jwks-rsa`, for better compatibility with the project's ESM module system (`"type": "module"`).
+
 #### NAPI-RS SDK Patch (v1.0.0 Workaround)
 
 The published `@databricks/zerobus-ingest-sdk@1.0.0` tarball is missing its `index.js` entry point (NAPI-RS build step was skipped before publish). The native `.node` binaries are present but Node.js can't load them without the JS shim. A postinstall patch copies locally-built files into `node_modules`:
@@ -98,7 +244,7 @@ Configured in `src/app/appkit.plugins.json`:
 | `files` | `@databricks/appkit` | File operations against Volumes and Unity Catalog | Optional |
 | `genie` | `@databricks/appkit` | AI/BI Genie space integration | Optional |
 
-### App Resources (7 total)
+### App Resources (10 total)
 
 Defined in `resources/zerobus_ingest.app.yml` and mapped to environment variables in `src/app/app.yaml`:
 
@@ -111,6 +257,9 @@ Defined in `resources/zerobus_ingest.app.yml` and mapped to environment variable
 | `zerobus-endpoint` | Secret scope | `zerobus-endpoint` | `ZEROBUS_ENDPOINT` |
 | `zerobus-target-table` | Secret scope | `zerobus-target-table` | `ZEROBUS_TARGET_TABLE` |
 | `zerobus-stream-pool-size` | Secret scope | `zerobus-stream-pool-size` | `ZEROBUS_STREAM_POOL_SIZE` |
+| `jwt-signing-secret` | Secret scope | `jwt-signing-secret` | `JWT_SIGNING_SECRET` |
+| `apple-bundle-id` | Secret scope | `apple-bundle-id` | `APPLE_BUNDLE_ID` |
+| `ios-spn-application-id` | Secret scope | `ios-spn-application-id` | `IOS_SPN_APPLICATION_ID` |
 
 Platform-injected (no `valueFrom` needed): `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGSSLMODE`, `DATABRICKS_CLIENT_ID`, `DATABRICKS_CLIENT_SECRET`.
 
@@ -131,15 +280,17 @@ dbxW_zerobus_app/
 ├── README.md                               # This file
 ├── .gitignore                              # Excludes .databricks/, build artifacts, node_modules
 ├── resources/
-│   ├── zerobus_ingest.app.yml              # AppKit app resource (7 resources, per-target permissions)
+│   ├── zerobus_ingest.app.yml              # AppKit app resource (10 resources, per-target permissions)
 │   └── post_deploy_app_tags.job.yml        # Post-deploy job — applies workspace entity tags to the app
 ├── src/
 │   ├── ops/                                # Operational notebooks
 │   │   └── post-deploy-app-tags.ipynb      # Applies tags via Workspace Entity Tag Assignments API
+│   ├── endpoint-validation/                # Smoke test notebooks
+│   │   └── validate-zerobus-ingest.ipynb   # Endpoint validation for ZeroBus ingest
 │   └── app/                                # AppKit source (source_code_path target)
-│       ├── app.yaml                        # Runtime command + env var bindings
+│       ├── app.yaml                        # Runtime command + env var bindings (10 custom vars)
 │       ├── appkit.plugins.json             # Plugin registry (lakebase, server, analytics, etc.)
-│       ├── package.json                    # Node.js deps + postinstall patch hook
+│       ├── package.json                    # Node.js deps (incl. jose for JWT) + postinstall patch hook
 │       ├── package-lock.json               # Locked dependency tree
 │       ├── scripts/
 │       │   └── patch-zerobus-sdk.mjs       # Postinstall: copies vendored SDK shim into node_modules
@@ -148,15 +299,31 @@ dbxW_zerobus_app/
 │       │       ├── index.js                # NAPI-RS JS shim — built locally with Rust 1.70+
 │       │       ├── index.d.ts              # TypeScript type definitions
 │       │       └── README.md               # Build prerequisites and instructions
+│       ├── shared/                         # Code shared between server and client
+│       │   └── synthetic-healthkit.ts      # Synthetic HealthKit data generator
 │       ├── server/                         # Express backend
-│       │   ├── server.ts                   # Entry point — createApp + plugin init
+│       │   ├── server.ts                   # Entry point — createApp + plugin init + auth + route guard
+│       │   ├── otel.ts                     # OpenTelemetry instrumentation
 │       │   ├── services/
-│       │   │   └── zerobus-service.ts      # SDK stream pool: init, round-robin, graceful shutdown
+│       │   │   ├── auth-service.ts         # JWT auth: Apple JWKS, token signing, Lakebase CRUD
+│       │   │   ├── zerobus-service.ts      # SDK stream pool: init, round-robin, graceful shutdown
+│       │   │   ├── synthetic-data-service.ts # Synthetic HealthKit data for load testing
+│       │   │   └── load-test-history-service.ts # Load test history persistence
+│       │   ├── middleware/
+│       │   │   ├── jwt-auth.ts             # requireAuth / optionalAuth Express middleware
+│       │   │   ├── spn-route-guard.ts      # Global SPN route guard (caller identification + access matrix)
+│       │   │   └── rate-limit.ts           # In-memory sliding window rate limiter factory
+│       │   ├── utils/
+│       │   │   └── extract-user.ts         # 3-way user identity extraction (Bearer/email/anon)
 │       │   └── routes/
+│       │       ├── auth/
+│       │       │   └── auth-routes.ts      # POST /apple, /refresh, /revoke + GET /health (rate-limited)
 │       │       ├── zerobus/
 │       │       │   └── ingest-routes.ts    # POST routes per record type, health check
-│       │       └── lakebase/
-│       │           └── todo-routes.ts      # Sample Lakebase CRUD routes (scaffold)
+│       │       ├── lakebase/
+│       │       │   └── todo-routes.ts      # Sample Lakebase CRUD routes (scaffold)
+│       │       └── testing/
+│       │           └── load-test-routes.ts # Synthetic data load testing routes
 │       ├── client/                         # React frontend
 │       │   ├── index.html                  # HTML entry point
 │       │   ├── vite.config.ts              # Vite build configuration
@@ -164,7 +331,7 @@ dbxW_zerobus_app/
 │       │   ├── src/
 │       │   │   ├── App.tsx                 # Root React component
 │       │   │   ├── main.tsx                # React DOM entry
-│       │   │   └── pages/                  # Page components (home, health, docs, security, lakebase)
+│       │   │   └── pages/                  # Page components (home, health, docs, security, lakebase, testing)
 │       │   └── public/                     # Static assets (favicons, fonts, brand images, manifest)
 │       ├── tests/
 │       │   └── smoke.spec.ts              # Playwright smoke test
@@ -182,9 +349,10 @@ dbxW_zerobus_app/
 │       └── .gitignore                      # AppKit-specific ignores
 └── fixtures/
     ├── sessions/                           # Development session logs
+    ├── icons/                              # Brand icon assets
     ├── issues/
     │   └── zerobus-sdk-missing-platform-binaries.md  # GitHub issue draft for SDK packaging bugs
-    └── AppKit App Bundle Setup Session.ipynb
+    └── Load Test History Implementation Plan.ipynb
 ```
 
 ## Variables
@@ -225,6 +393,30 @@ Obtain these by running:
 ```bash
 databricks postgres list-branches projects/dbxw-zerobus-wearables
 databricks postgres list-databases projects/dbxw-zerobus-wearables/branches/production
+```
+
+### JWT Authentication & Auth Hardening
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `jwt_signing_secret_key` | `jwt_signing_secret` | Secret scope key for the HS256 JWT signing secret |
+| `apple_bundle_id_key` | `apple_bundle_id` | Secret scope key for the iOS app bundle identifier |
+| `ios_spn_application_id_key` | `ios_spn_application_id` | Secret scope key for the iOS bootstrap SPN application_id |
+
+**Provisioning (one-time per target):**
+
+```bash
+# Generate and store the JWT signing secret
+databricks secrets put-secret dbxw_zerobus_credentials jwt_signing_secret \
+  --string-value "$(openssl rand -base64 32)"
+
+# Store the iOS app bundle ID (must match Xcode project)
+databricks secrets put-secret dbxw_zerobus_credentials apple_bundle_id \
+  --string-value "com.dbxwearables.healthKit"
+
+# Store the iOS bootstrap SPN's application_id (for route guard verification)
+databricks secrets put-secret dbxw_zerobus_credentials ios_spn_application_id \
+  --string-value "<spn-application-id-uuid>"
 ```
 
 ### App-specific
