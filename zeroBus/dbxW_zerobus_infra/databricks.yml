@@ -119,7 +119,7 @@ variables:
       The iOS app bundle identifier. Stored in the secret scope under
       the key named by apple_bundle_id_key. Used to validate the `aud`
       claim in Apple identity tokens during Sign in with Apple.
-    default: com.dbxwearables.healthKit
+    default: com.dbxwearables.dbxWearablesApp
   apple_bundle_id_key:
     description: >
       The key name for the Apple bundle ID in the secret scope.
