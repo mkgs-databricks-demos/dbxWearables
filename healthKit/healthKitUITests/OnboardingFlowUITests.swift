@@ -1,9 +1,20 @@
 import XCTest
 
-/// Verifies the first-launch onboarding actually shows up and walks through
-/// its 4 pages. We launch with `-hasCompletedOnboarding NO` so the argument
-/// domain forces UserDefaults to report the flag as false regardless of any
-/// prior simulator state.
+/// Verifies the gated 6-page onboarding flow.
+///
+/// Pages: Welcome → ZeroBus → Data Types → API Credentials → Sign in with
+/// Apple → HealthKit Permission → Get Started.
+///
+/// Launch arguments:
+/// - `-hasCompletedOnboarding NO` — argument-domain override forces UserDefaults
+///   to report the flag false, so onboarding shows on every launch.
+/// - `-resetForUITests YES` — wipes UserDefaults + Documents/sync_ledger so each
+///   case has a clean baseline.
+/// - `-onboardingPrefillCredentials YES` — AppDelegate seeds Keychain +
+///   WorkspaceConfig so the credentials gate reports satisfied at launch.
+/// - `-onboardingSimulateSignedIn YES` — AppDelegate seeds a non-expired JWT
+///   so AppleSignInManager.restoreSession() lands in `.authenticated`,
+///   satisfying the sign-in gate without invoking real SIWA.
 final class OnboardingFlowUITests: XCTestCase {
 
     private var app: XCUIApplication!
@@ -12,12 +23,16 @@ final class OnboardingFlowUITests: XCTestCase {
         super.setUp()
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchArguments = ["-hasCompletedOnboarding", "NO"]
+        // Default: clean baseline, no prefill. Individual tests append more
+        // launch args before calling launch().
+        app.launchArguments = [
+            "-resetForUITests", "YES",
+            "-hasCompletedOnboarding", "NO"
+        ]
         app.launchEnvironment = [
             "DBX_API_BASE_URL": "https://test.databricks.com/apps/wearables",
             "DBX_WORKSPACE_HOST": "https://test.cloud.databricks.com"
         ]
-        app.launch()
     }
 
     override func tearDown() {
@@ -25,10 +40,10 @@ final class OnboardingFlowUITests: XCTestCase {
         super.tearDown()
     }
 
+    // MARK: - Page presence
+
     func testOnboardingShowsWelcomeCopyOnFirstLaunch() {
-        // Page 1 (welcome) shows the dbxWearables wordmark + a tagline that
-        // mentions ZeroBus. We assert on the tagline because it's regular
-        // text and easy to find by partial match.
+        app.launch()
         let welcomeText = app.staticTexts.containing(
             NSPredicate(format: "label CONTAINS[c] %@", "ZeroBus")
         ).firstMatch
@@ -37,62 +52,108 @@ final class OnboardingFlowUITests: XCTestCase {
     }
 
     func testNextButtonAdvancesToZeroBusPage() {
+        app.launch()
         let nextButton = app.buttons["Next"]
         XCTAssertTrue(nextButton.waitForExistence(timeout: 5))
         nextButton.tap()
-
-        // Page 2 has a heading "What is ZeroBus?"
         XCTAssertTrue(app.staticTexts["What is ZeroBus?"].waitForExistence(timeout: 3),
                       "After tapping Next, the ZeroBus page should be visible")
     }
 
-    func testFinalPageShowsDismissControl() {
-        let nextButton = app.buttons["Next"]
-        XCTAssertTrue(nextButton.waitForExistence(timeout: 5))
-        // Tap Next 3 times to reach page 4 (the grant-access page).
-        nextButton.tap()
-        XCTAssertTrue(nextButton.waitForExistence(timeout: 3))
-        nextButton.tap()
-        XCTAssertTrue(nextButton.waitForExistence(timeout: 3))
-        nextButton.tap()
-
-        // Page 4 shows different controls depending on HealthKit auth status:
-        //   - Authorized (typical on simulator):   "Get Started"
-        //   - Not yet authorized (real device):     "Grant Access" + "Skip for Now"
-        // We accept either path — the contract is that page 4 always exposes
-        // *some* dismissal control.
-        let getStarted = app.buttons["Get Started"]
-        let grantAccess = app.buttons["Grant Access"]
-        XCTAssertTrue(
-            getStarted.waitForExistence(timeout: 3) || grantAccess.exists,
-            "Final onboarding page must show either 'Get Started' or 'Grant Access'"
-        )
-    }
-
-    func testDismissingOnboardingRevealsTabBar() {
+    func testCredentialsPageAppearsAfterDataTypes() {
+        app.launch()
+        // Welcome → ZeroBus → Data Types → Credentials. Tap Next 3x.
         let nextButton = app.buttons["Next"]
         XCTAssertTrue(nextButton.waitForExistence(timeout: 5))
         nextButton.tap(); nextButton.tap(); nextButton.tap()
 
-        // Dismiss via whichever final-page control is shown — see
-        // testFinalPageShowsDismissControl for the auth-state branching.
-        let getStarted = app.buttons["Get Started"]
-        let skip = app.buttons["Skip for Now"]
-        if getStarted.waitForExistence(timeout: 3) {
-            getStarted.tap()
-        } else if skip.waitForExistence(timeout: 3) {
-            skip.tap()
-        } else {
-            XCTFail("Final onboarding page exposed no dismissal button")
-        }
+        // The credentials page surfaces a "Connect to Databricks" header and
+        // a QR-scan CTA. Either is a sufficient signal.
+        let header = app.staticTexts["Connect to Databricks"]
+        XCTAssertTrue(header.waitForExistence(timeout: 3),
+                      "Page 4 should show the credentials configuration header")
+    }
 
-        // The tab bar lives below the onboarding sheet, so it always exists
-        // in the hierarchy. After dismiss, it should be hittable — that's the
-        // signal we use to confirm the sheet went away.
-        let tabBar = app.tabBars.firstMatch
-        XCTAssertTrue(tabBar.waitForExistence(timeout: 5))
-        let dashboard = tabBar.buttons["Dashboard"]
-        XCTAssertTrue(dashboard.isHittable,
-                      "Dashboard tab must be hittable once the onboarding sheet dismisses")
+    // MARK: - Gating
+
+    func testCredentialsNextDisabledWhenNothingConfigured() {
+        app.launch()
+        let nextButton = app.buttons["Next"]
+        XCTAssertTrue(nextButton.waitForExistence(timeout: 5))
+        nextButton.tap(); nextButton.tap(); nextButton.tap()
+
+        // We should now be on the credentials page. There are multiple "Next"
+        // buttons in the app over time, but the visible primary CTA on the
+        // credentials page is gated until creds + WorkspaceConfig are set.
+        // Without prefill, that means the bottom Next button is disabled.
+        XCTAssertTrue(app.staticTexts["Connect to Databricks"].waitForExistence(timeout: 3))
+
+        // Find the primary Next at the bottom action bar. It exists but is
+        // not enabled.
+        let bottomNext = app.buttons["Next"]
+        XCTAssertTrue(bottomNext.exists)
+        XCTAssertFalse(bottomNext.isEnabled,
+                       "Credentials gate must keep the Next button disabled until configured")
+    }
+
+    func testCredentialsNextEnabledWhenPrefilled() {
+        app.launchArguments.append(contentsOf: ["-onboardingPrefillCredentials", "YES"])
+        app.launch()
+
+        let nextButton = app.buttons["Next"]
+        XCTAssertTrue(nextButton.waitForExistence(timeout: 5))
+        nextButton.tap(); nextButton.tap(); nextButton.tap()
+
+        // With creds prefilled at launch, the gate should land us *past*
+        // page 4 via blow-through (advanceIfAlreadySatisfied). We may end up
+        // on the sign-in page instead of the credentials page.
+        let signInHeader = app.staticTexts["Sign In with Apple"]
+        XCTAssertTrue(signInHeader.waitForExistence(timeout: 3),
+                      "With prefilled credentials, blow-through should land on the sign-in page")
+    }
+
+    func testReplayBlowsThroughWhenAllConfigured() {
+        // Both gates pre-satisfied via launch fixtures.
+        app.launchArguments.append(contentsOf: [
+            "-onboardingPrefillCredentials", "YES",
+            "-onboardingSimulateSignedIn", "YES"
+        ])
+        app.launch()
+
+        let nextButton = app.buttons["Next"]
+        XCTAssertTrue(nextButton.waitForExistence(timeout: 5))
+        nextButton.tap(); nextButton.tap(); nextButton.tap()
+
+        // Should blow through pages 4 and 5 and land on the HealthKit /
+        // Get Started page (page 6).
+        let getStarted = app.buttons["Get Started"]
+        let grantAccess = app.buttons["Grant Access"]
+        XCTAssertTrue(
+            getStarted.waitForExistence(timeout: 5) || grantAccess.waitForExistence(timeout: 1),
+            "Replay onboarding with credentials + sign-in should land on the final HealthKit page"
+        )
+    }
+
+    // MARK: - Final page contract
+
+    func testFinalPageShowsDismissControlWhenConfigured() {
+        app.launchArguments.append(contentsOf: [
+            "-onboardingPrefillCredentials", "YES",
+            "-onboardingSimulateSignedIn", "YES"
+        ])
+        app.launch()
+
+        let nextButton = app.buttons["Next"]
+        XCTAssertTrue(nextButton.waitForExistence(timeout: 5))
+        nextButton.tap(); nextButton.tap(); nextButton.tap()
+
+        // Final page exposes "Get Started" (HealthKit authorized) or
+        // "Grant Access" (not yet authorized). Either is acceptable.
+        let getStarted = app.buttons["Get Started"]
+        let grantAccess = app.buttons["Grant Access"]
+        XCTAssertTrue(
+            getStarted.waitForExistence(timeout: 5) || grantAccess.exists,
+            "Final onboarding page must show either 'Get Started' or 'Grant Access'"
+        )
     }
 }

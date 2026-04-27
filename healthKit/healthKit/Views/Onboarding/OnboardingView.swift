@@ -93,6 +93,11 @@ struct OnboardingView: View {
         .onAppear {
             advanceIfAlreadySatisfied()
         }
+        .onChange(of: currentPage) { _, _ in
+            // When manual nav (or blow-through) lands on a gated page whose
+            // gate is already satisfied, keep advancing.
+            advanceIfAlreadySatisfied()
+        }
         .onChange(of: signInManager.authState.isAuthenticated) { _, _ in
             // If the user just completed sign-in on page 5, surface the
             // change immediately by recomputing the gate.
