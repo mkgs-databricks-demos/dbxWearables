@@ -11,17 +11,23 @@
 // ── Authentication pipeline (runs BEFORE this function) ───────────────
 //
 //   1. spn-route-guard.ts (global middleware on /api/*)
-//      Validates Bearer JWT via authService.verifyAccessToken() and
-//      populates req.auth with { sub, device_id, platform }. This
-//      is the primary authentication point for mobile clients.
+//      Classifies caller type (workspace-user, ios-spn, etc.).
+//      For direct app-jwt-user requests, validates the Bearer JWT
+//      and populates req.auth.
 //
 //   2. optionalAuth middleware (on ingest route, defense-in-depth)
+//      Checks two JWT sources in order:
+//        a) Authorization: Bearer <token> (direct JWT access)
+//        b) X-User-JWT: <token> (SPN-authenticated mobile requests
+//           where Authorization carries the Databricks SPN OAuth
+//           token for sidecar auth, and the app-issued JWT rides
+//           in this custom header for user identity)
 //      Short-circuits if req.auth is already set (by route guard).
-//      Validates Bearer JWT if route guard somehow missed it.
 //
 // By the time extractUser() runs, req.auth is populated for any
-// request with a valid app-issued JWT. This function simply reads
-// the validated result — it does NOT perform JWT validation itself.
+// request with a valid app-issued JWT (from either header source).
+// This function simply reads the validated result — it does NOT
+// perform JWT validation itself.
 
 import type { Request } from 'express';
 
@@ -33,6 +39,12 @@ import type { Request } from 'express';
  *    the user first signed in via Apple. This is the canonical user_id
  *    for mobile clients — stable, privacy-preserving, and tied to the
  *    Apple Sign In identity.
+ *
+ *    The JWT may arrive via:
+ *      - Authorization: Bearer <app-jwt> (direct mobile access)
+ *      - X-User-JWT: <app-jwt> (SPN-authenticated mobile request;
+ *        Authorization carries the Databricks SPN token for sidecar
+ *        auth, and the app JWT is in this custom header)
  *
  * 2. x-forwarded-email
  *    Workspace traffic (notebook, job, service). Injected by AppKit's
@@ -61,7 +73,7 @@ export function extractUser(req: Request): string {
     return email;
   }
 
-  // ── Branch 3: No auth context ───────────────────────────────────
+  // ── Branch 3: No auth context ───────────────────────────────
   return 'anonymous';
 }
 

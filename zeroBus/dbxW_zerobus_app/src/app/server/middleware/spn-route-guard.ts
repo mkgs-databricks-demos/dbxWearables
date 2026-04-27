@@ -28,9 +28,13 @@
 //   ──────────────────┼─────────────┼───────────────┼──────────────┼────────
 //   workspace-user    │     ✓       │       ✓       │      ✓       │   ✓
 //   app-jwt-user      │     ✓       │       ✓       │      ✗       │   ✓
-//   ios-spn (verified)│     ✓       │       ✗       │      ✗       │   ✓
+//   ios-spn (verified)│     ✓       │       ✓       │      ✗       │   ✓
 //   proxy-unverified  │     ✓       │       ✗       │      ✗       │   ✓
 //   anonymous         │     ✗       │       ✗       │      ✗       │   ✓
+//
+//   ios-spn can access ingest because the SPN authenticates the iOS
+//   device to Databricks, while user identity is carried in the
+//   X-User-JWT header (validated by optionalAuth in jwt-auth.ts).
 //
 // ── Route zones ──────────────────────────────────────────────────────
 //
@@ -70,8 +74,11 @@ function classifyRoute(path: string): RouteZone {
   // Health endpoints are always open (diagnostic, no sensitive data)
   if (path.endsWith('/health')) return 'health';
 
-  if (path.startsWith('/api/v1/auth/')) return 'auth';
-  if (path.startsWith('/api/v1/healthkit/')) return 'ingest';
+  // Express strips the /api/ prefix from req.path when middleware is
+  // mounted via app.use('/api/', guard). Check both the stripped
+  // form (/v1/...) and the full form (/api/v1/...) for robustness.
+  if (path.startsWith('/v1/auth/') || path.startsWith('/api/v1/auth/')) return 'auth';
+  if (path.startsWith('/v1/healthkit/') || path.startsWith('/api/v1/healthkit/')) return 'ingest';
 
   // Everything else under /api/ is admin (lakebase, testing, etc.)
   return 'admin';
@@ -82,7 +89,7 @@ function classifyRoute(path: string): RouteZone {
 const ACCESS_MATRIX: Record<CallerType, Set<RouteZone>> = {
   'workspace-user':   new Set(['health', 'auth', 'ingest', 'admin']),
   'app-jwt-user':     new Set(['health', 'auth', 'ingest']),
-  'ios-spn':          new Set(['health', 'auth']),
+  'ios-spn':          new Set(['health', 'auth', 'ingest']),
   'proxy-unverified': new Set(['health', 'auth']),
   'anonymous':        new Set(['health']),
 };
