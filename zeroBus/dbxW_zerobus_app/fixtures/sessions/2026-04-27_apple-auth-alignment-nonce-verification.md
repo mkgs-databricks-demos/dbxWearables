@@ -176,14 +176,52 @@ All detailed error messages remain in `console.error()` for server-side OTel log
 
 **Design decision:** Error codes use `UPPER_SNAKE_CASE` constants that the iOS app can switch on. The `/refresh` endpoint already had `TOKEN_EXPIRED` and `TOKEN_REVOKED` codes — this change extends the pattern to all auth endpoints and adds `NONCE_INVALID`, `SIGNATURE_INVALID`, `AUDIENCE_MISMATCH`, `IDENTITY_MISMATCH`, `APPLE_AUTH_FAILED`, `INVALID_TOKEN`, `REFRESH_FAILED`, `MISSING_FIELD`, `SERVICE_UNAVAILABLE`, and `INTERNAL_ERROR`.
 
+#### 8. Structured JSON Auth Logging
+
+**Files:** `auth-logger.ts` (new), `auth-routes.ts`, `auth-service.ts`
+
+Created a centralized `auth-logger.ts` utility that emits structured JSON log lines consumed by the OTel log exporter. All auth events are now machine-parseable JSON with standardized fields.
+
+**Privacy:** All identifiers (user_id, device_id, apple_sub) are SHA-256 hashed and truncated to 12 hex chars before logging. This preserves cross-entry correlation without storing raw PII.
+
+**Event types:** `apple_exchange`, `token_refresh`, `token_revoke`, `service_init`, `migration`, `token_reuse_detected`
+
+**Standard fields per log entry:**
+| Field | Type | Description |
+| --- | --- | --- |
+| `logger` | string | Always `"auth"` |
+| `event` | string | Event type identifier |
+| `outcome` | string | `success`, `failure`, or `warn` |
+| `ts` | string | ISO-8601 timestamp |
+| `error_code` | string | Machine-readable code (matches sanitized client codes) |
+| `error_detail` | string | Detailed message (server-side only) |
+| `user_id_hash` | string | SHA-256 prefix of user UUID |
+| `device_id_hash` | string | SHA-256 prefix of device UUID |
+| `apple_sub_hash` | string | SHA-256 prefix of Apple sub |
+| `duration_ms` | number | Request processing time |
+| `real_user_status` | number | Apple fraud indicator (0/1/2) |
+| `client_ip` | string | From x-forwarded-for |
+| `platform` | string | e.g. `apple_healthkit` |
+| `app_version` | string | Client-reported version |
+
+**Coverage:** 21 logAuthEvent() calls across 2 files (14 in auth-routes.ts, 7 in auth-service.ts). 3 console.warn calls retained for developer-facing provisioning instructions.
+
+**Design decisions:**
+- JSON lines to console (not a logging framework) — OTel log exporter already captures console output
+- Hash prefix length 12 hex = 48 bits — collision probability ~1/281 trillion
+- `getClientIp()` utility extracts from x-forwarded-for for rate limit correlation
+- Startup/provisioning warnings kept as console.warn for dev ergonomics (alongside structured logs)
+- Migration events include `tables_created` and `tables_existed` arrays for operational visibility
+
 ---
 
 ### Files Modified
 
 | File | Changes | Lines |
 | --- | --- | --- |
+| `server/utils/auth-logger.ts` | **New file.** Structured JSON auth logger: `logAuthEvent()`, `hashId()` (SHA-256 prefix), `getClientIp()`. 6 event types, typed interface. | 0 → 158 |
 | `server/services/auth-service.ts` | Nonce verification in `validateAppleToken()`, `real_user_status` in `AppleTokenPayload` + return, updated JSDoc | 569 → 604 |
-| `server/routes/auth/auth-routes.ts` | Shared `handleAppleExchange` handler, `/apple/exchange` alias, camelCase field normalization, nonce passthrough, userId cross-check, dual-convention response, error message sanitization with error codes | 230 → 332 |
+| `server/routes/auth/auth-routes.ts` | Shared `handleAppleExchange` handler, `/apple/exchange` alias, camelCase field normalization, nonce passthrough, userId cross-check, dual-convention response, error message sanitization with error codes, structured JSON logging (14 logAuthEvent calls, request timing, clientIp) | 230 → 462 |
 
 ---
 
@@ -207,7 +245,7 @@ All detailed error messages remain in `console.error()` for server-side OTel log
 | # | Task | Files | Status |
 | --- | --- | --- | --- |
 | 7 | Sanitize error messages (generic client, detailed server logs) | `auth-routes.ts` | **Done** |
-| 8 | Structured JSON auth logging (hashed identifiers for OTel) | `auth-routes.ts`, `auth-service.ts` | Deferred |
+| 8 | Structured JSON auth logging (hashed identifiers for OTel) | `auth-logger.ts`, `auth-routes.ts`, `auth-service.ts` | **Done** |
 
 #### P2 — Nice to Have
 

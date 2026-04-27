@@ -21,6 +21,11 @@
 //   /refresh — 20 per 1 min (handles multi-device)
 //   /revoke — 10 per 1 min (logout is infrequent)
 //
+// Logging: All auth events are emitted as structured JSON lines via
+// auth-logger.ts. Identifiers are SHA-256 hashed (12 hex char prefix)
+// before logging. The OTel log exporter picks these up for the
+// _otel_logs table in Unity Catalog.
+//
 // See auth-service.ts for the core authentication logic.
 // See spn-route-guard.ts for route-level access control.
 
@@ -32,6 +37,7 @@ import {
   authRefreshLimiter,
   authRevokeLimiter,
 } from '../../middleware/rate-limit.js';
+import { logAuthEvent, getClientIp } from '../../utils/auth-logger.js';
 
 // ── AppKit interface (only the server plugin is needed) ────────────────
 
@@ -41,7 +47,7 @@ interface AppKitServer {
   };
 }
 
-// ── Route registration ─────────────────────────────────────────────────
+// ── Route registration ─────────────────────────────────────────────
 
 export async function setupAuthRoutes(appkit: AppKitServer) {
   if (!authService.isReady()) {
@@ -58,7 +64,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
 
   appkit.server.extend((app) => {
 
-    // ── POST /api/v1/auth/apple ──────────────────────────────────────
+    // ── POST /api/v1/auth/apple ──────────────────────────────────
     //
     // Exchange an Apple identity token for app credentials.
     //
@@ -87,7 +93,16 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
     // ── Handler (shared between /apple and /apple/exchange) ──────────
 
     const handleAppleExchange = async (req: Request, res: Response) => {
+      const start = Date.now();
+      const clientIp = getClientIp(req);
+
       if (!authService.isReady()) {
+        logAuthEvent({
+          event: 'apple_exchange',
+          outcome: 'failure',
+          errorCode: 'SERVICE_UNAVAILABLE',
+          clientIp,
+        });
         res.status(503).json({
           status: 'error',
           code: 'SERVICE_UNAVAILABLE',
@@ -109,6 +124,14 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
 
         // ── Validate required fields ──────────────────────────────────
         if (!identityToken || typeof identityToken !== 'string') {
+          logAuthEvent({
+            event: 'apple_exchange',
+            outcome: 'failure',
+            errorCode: 'MISSING_FIELD',
+            errorDetail: 'appleIdToken missing',
+            clientIp,
+            durationMs: Date.now() - start,
+          });
           res.status(400).json({
             status: 'error',
             code: 'MISSING_FIELD',
@@ -118,6 +141,14 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
         }
 
         if (!deviceId || typeof deviceId !== 'string') {
+          logAuthEvent({
+            event: 'apple_exchange',
+            outcome: 'failure',
+            errorCode: 'MISSING_FIELD',
+            errorDetail: 'deviceId missing',
+            clientIp,
+            durationMs: Date.now() - start,
+          });
           res.status(400).json({
             status: 'error',
             code: 'MISSING_FIELD',
@@ -133,10 +164,15 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
         // If the client sends a userId, verify it matches the validated
         // token's sub claim. Rejects forged requests early.
         if (clientUserId && clientUserId !== applePayload.sub) {
-          console.warn(
-            `[Auth] userId cross-check failed: client=${clientUserId.slice(0, 8)}... ` +
-            `token=${applePayload.sub.slice(0, 8)}...`,
-          );
+          logAuthEvent({
+            event: 'apple_exchange',
+            outcome: 'failure',
+            errorCode: 'IDENTITY_MISMATCH',
+            errorDetail: `client=${clientUserId.slice(0, 8)}... token=${applePayload.sub.slice(0, 8)}...`,
+            deviceId,
+            clientIp,
+            durationMs: Date.now() - start,
+          });
           res.status(400).json({
             status: 'error',
             code: 'IDENTITY_MISMATCH',
@@ -145,13 +181,13 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
           return;
         }
 
-        // ── Upsert user (keyed on Apple's sub claim) ──────────────────
+        // ── Upsert user (keyed on Apple's sub claim) ────────────────
         const userId = await authService.upsertUser(
           applePayload.sub,
           undefined, // display_name — only available on first auth via fullName credential
         );
 
-        // ── Register device ───────────────────────────────────────────
+        // ── Register device ───────────────────────────────────────
         await authService.registerDevice(
           userId,
           deviceId,
@@ -159,7 +195,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
           appVersion,
         );
 
-        // ── Issue tokens ──────────────────────────────────────────────
+        // ── Issue tokens ──────────────────────────────────────────
         const tokens = await authService.issueTokens(
           userId,
           deviceId,
@@ -180,18 +216,22 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
           tokenType:    tokens.token_type,
         };
 
-        console.log(
-          `[Auth] Apple sign-in: user=${userId} device=${deviceId} ` +
-          `apple_sub=${applePayload.sub.slice(0, 8)}...` +
-          (applePayload.real_user_status != null
-            ? ` real_user_status=${applePayload.real_user_status}`
-            : ''),
-        );
+        logAuthEvent({
+          event: 'apple_exchange',
+          outcome: 'success',
+          userId,
+          deviceId,
+          appleSub: applePayload.sub,
+          realUserStatus: applePayload.real_user_status,
+          platform: platform || 'apple_healthkit',
+          appVersion,
+          clientIp,
+          durationMs: Date.now() - start,
+        });
 
         res.status(200).json(response);
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
-        console.error('[Auth] Apple auth failed:', detail);
 
         // Map internal error messages to client-safe codes.
         // Detailed messages stay in server logs only.
@@ -208,6 +248,15 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
                    : isValidationError             ? 'APPLE_AUTH_FAILED'
                    :                                 'INTERNAL_ERROR';
 
+        logAuthEvent({
+          event: 'apple_exchange',
+          outcome: 'failure',
+          errorCode: code,
+          errorDetail: detail,
+          clientIp,
+          durationMs: Date.now() - start,
+        });
+
         res.status(isValidationError ? 401 : 500).json({
           status: 'error',
           code,
@@ -220,7 +269,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
     app.post('/api/v1/auth/apple', appleLimiter, handleAppleExchange);
     app.post('/api/v1/auth/apple/exchange', appleLimiter, handleAppleExchange);
 
-    // ── POST /api/v1/auth/refresh ────────────────────────────────────
+    // ── POST /api/v1/auth/refresh ────────────────────────────────
     //
     // Exchange a refresh token for new credentials.
     // Implements token rotation: old refresh token is revoked, new one issued.
@@ -231,7 +280,16 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
     // Rate limit: 20 per 1 min per IP
 
     app.post('/api/v1/auth/refresh', refreshLimiter, async (req: Request, res: Response) => {
+      const start = Date.now();
+      const clientIp = getClientIp(req);
+
       if (!authService.isReady()) {
+        logAuthEvent({
+          event: 'token_refresh',
+          outcome: 'failure',
+          errorCode: 'SERVICE_UNAVAILABLE',
+          clientIp,
+        });
         res.status(503).json({
           status: 'error',
           code: 'SERVICE_UNAVAILABLE',
@@ -244,6 +302,14 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
         const { refresh_token } = req.body || {};
 
         if (!refresh_token || typeof refresh_token !== 'string') {
+          logAuthEvent({
+            event: 'token_refresh',
+            outcome: 'failure',
+            errorCode: 'MISSING_FIELD',
+            errorDetail: 'refresh_token missing',
+            clientIp,
+            durationMs: Date.now() - start,
+          });
           res.status(400).json({
             status: 'error',
             code: 'MISSING_FIELD',
@@ -254,17 +320,32 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
 
         const tokens = await authService.refreshTokens(refresh_token);
 
-        console.log(`[Auth] Token refreshed: user=${tokens.user_id}`);
+        logAuthEvent({
+          event: 'token_refresh',
+          outcome: 'success',
+          userId: tokens.user_id,
+          clientIp,
+          durationMs: Date.now() - start,
+        });
+
         res.status(200).json(tokens);
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
-        console.error('[Auth] Refresh failed:', detail);
 
         // Map to client-safe error codes — detail stays in server logs
         const code = detail.includes('expired') ? 'TOKEN_EXPIRED'
                    : detail.includes('revoked') ? 'TOKEN_REVOKED'
                    : detail.includes('Invalid') ? 'INVALID_TOKEN'
                    :                               'REFRESH_FAILED';
+
+        logAuthEvent({
+          event: 'token_refresh',
+          outcome: 'failure',
+          errorCode: code,
+          errorDetail: detail,
+          clientIp,
+          durationMs: Date.now() - start,
+        });
 
         res.status(401).json({
           status: 'error',
@@ -274,7 +355,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
       }
     });
 
-    // ── POST /api/v1/auth/revoke ─────────────────────────────────────
+    // ── POST /api/v1/auth/revoke ─────────────────────────────────
     //
     // Revoke a refresh token (logout).
     // Requires a valid access JWT to prevent unauthorized revocation.
@@ -282,7 +363,16 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
     // Rate limit: 10 per 1 min per IP
 
     app.post('/api/v1/auth/revoke', revokeLimiter, requireAuth, async (req: Request, res: Response) => {
+      const start = Date.now();
+      const clientIp = getClientIp(req);
+
       if (!authService.isReady()) {
+        logAuthEvent({
+          event: 'token_revoke',
+          outcome: 'failure',
+          errorCode: 'SERVICE_UNAVAILABLE',
+          clientIp,
+        });
         res.status(503).json({
           status: 'error',
           code: 'SERVICE_UNAVAILABLE',
@@ -295,6 +385,15 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
         const { refresh_token } = req.body || {};
 
         if (!refresh_token || typeof refresh_token !== 'string') {
+          logAuthEvent({
+            event: 'token_revoke',
+            outcome: 'failure',
+            errorCode: 'MISSING_FIELD',
+            errorDetail: 'refresh_token missing',
+            userId: req.auth?.sub,
+            clientIp,
+            durationMs: Date.now() - start,
+          });
           res.status(400).json({
             status: 'error',
             code: 'MISSING_FIELD',
@@ -305,14 +404,30 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
 
         await authService.revokeRefreshToken(refresh_token);
 
-        console.log(`[Auth] Token revoked: user=${req.auth?.sub}`);
+        logAuthEvent({
+          event: 'token_revoke',
+          outcome: 'success',
+          userId: req.auth?.sub,
+          clientIp,
+          durationMs: Date.now() - start,
+        });
+
         res.status(200).json({
           status: 'success',
           message: 'Token revoked',
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        console.error('[Auth] Revoke failed:', message);
+
+        logAuthEvent({
+          event: 'token_revoke',
+          outcome: 'failure',
+          errorCode: 'INTERNAL_ERROR',
+          errorDetail: message,
+          userId: req.auth?.sub,
+          clientIp,
+          durationMs: Date.now() - start,
+        });
 
         res.status(500).json({
           status: 'error',
@@ -322,7 +437,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
       }
     });
 
-    // ── GET /api/v1/auth/health ──────────────────────────────────────
+    // ── GET /api/v1/auth/health ──────────────────────────────────
     //
     // Health check for the auth subsystem.
     // Reports initialization state, env var presence, and route guard config.

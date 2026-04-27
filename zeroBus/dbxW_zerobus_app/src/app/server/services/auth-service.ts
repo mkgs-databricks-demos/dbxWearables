@@ -23,14 +23,20 @@
 //   JWT_SIGNING_SECRET  — HS256 signing key (from secret scope)
 //   APPLE_BUNDLE_ID     — iOS app bundle identifier (for audience validation)
 //
+// Logging: Security-relevant events (token reuse, migration, init) are
+// emitted as structured JSON via auth-logger.ts. Identifiers are SHA-256
+// hashed before logging. Setup warnings retain human-readable console
+// output for developer ergonomics (provisioning instructions).
+//
 // Apple JWKS endpoint (public, well-known):
 //   The service fetches Apple's public signing keys at runtime to validate
 //   identity tokens. The jose library caches keys automatically.
 
 import crypto from 'node:crypto';
 import { SignJWT, jwtVerify, createRemoteJWKSet, errors as joseErrors } from 'jose';
+import { logAuthEvent } from '../utils/auth-logger.js';
 
-// ── Configuration ─────────────────────────────────────────────────────
+// ── Configuration ─────────────────────────────────────────────────
 
 /** Access token lifetime. Short-lived — clients use refresh tokens to renew. */
 const ACCESS_TOKEN_EXPIRY = '15m';
@@ -87,7 +93,7 @@ interface LakebaseClient {
   query(text: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
 }
 
-// ── Lakebase Migration SQL ────────────────────────────────────────────
+// ── Lakebase Migration SQL ────────────────────────────────────────
 //
 // Tables live in the `auth` schema to isolate auth data from the
 // existing `app` schema used by todo-routes.ts (sample scaffold).
@@ -136,7 +142,7 @@ const MIGRATION_SQL = {
   `,
 };
 
-// ── Service class ─────────────────────────────────────────────────────
+// ── Service class ─────────────────────────────────────────────────
 
 class AuthService {
   private lakebase: LakebaseClient | null = null;
@@ -145,7 +151,7 @@ class AuthService {
   private appleBundleId = '';
   private initialized = false;
 
-  // ── Initialization ──────────────────────────────────────────────────
+  // ── Initialization ──────────────────────────────────────────────
 
   /**
    * Initialize the auth service with the Lakebase client.
@@ -162,21 +168,35 @@ class AuthService {
 
     const signingSecret = process.env.JWT_SIGNING_SECRET;
     if (!signingSecret) {
+      // Human-readable console warning with provisioning command
       console.warn(
         '[Auth] JWT_SIGNING_SECRET not set — auth endpoints will be unavailable. ' +
         'Provision the secret: databricks secrets put-secret ' +
         'dbxw_zerobus_credentials jwt_signing_secret --string-value "<secret>"',
       );
+      logAuthEvent({
+        event: 'service_init',
+        outcome: 'warn',
+        errorCode: 'MISSING_SECRET',
+        errorDetail: 'JWT_SIGNING_SECRET not set',
+      });
       return;
     }
 
     this.appleBundleId = process.env.APPLE_BUNDLE_ID || '';
     if (!this.appleBundleId) {
+      // Human-readable console warning with provisioning command
       console.warn(
         '[Auth] APPLE_BUNDLE_ID not set — Apple token validation will reject all tokens. ' +
         'Provision the value: databricks secrets put-secret ' +
         'dbxw_zerobus_credentials apple_bundle_id --string-value "<bundle-id>"',
       );
+      logAuthEvent({
+        event: 'service_init',
+        outcome: 'warn',
+        errorCode: 'MISSING_CONFIG',
+        errorDetail: 'APPLE_BUNDLE_ID not set',
+      });
     }
 
     this.jwtSecret = new TextEncoder().encode(signingSecret);
@@ -190,7 +210,10 @@ class AuthService {
     await this.migrate();
 
     this.initialized = true;
-    console.log('[Auth] Service initialized — auth endpoints ready');
+    logAuthEvent({
+      event: 'service_init',
+      outcome: 'success',
+    });
   }
 
   /** Check if the service is properly initialized and ready to handle requests. */
@@ -198,7 +221,7 @@ class AuthService {
     return this.initialized;
   }
 
-  // ── Lakebase Migration ──────────────────────────────────────────────
+  // ── Lakebase Migration ──────────────────────────────────────────
 
   /**
    * Create the auth schema and tables if they don't exist.
@@ -206,6 +229,9 @@ class AuthService {
    */
   private async migrate(): Promise<void> {
     if (!this.lakebase) return;
+
+    const start = Date.now();
+    const tablesCreated: string[] = [];
 
     try {
       await this.lakebase.query(MIGRATION_SQL.createSchema);
@@ -215,25 +241,41 @@ class AuthService {
 
       if (!existing.has('users')) {
         await this.lakebase.query(MIGRATION_SQL.createUsers);
-        console.log('[Auth] Created auth.users table');
+        tablesCreated.push('auth.users');
       }
       if (!existing.has('devices')) {
         await this.lakebase.query(MIGRATION_SQL.createDevices);
-        console.log('[Auth] Created auth.devices table');
+        tablesCreated.push('auth.devices');
       }
       if (!existing.has('refresh_tokens')) {
         await this.lakebase.query(MIGRATION_SQL.createRefreshTokens);
-        console.log('[Auth] Created auth.refresh_tokens table');
+        tablesCreated.push('auth.refresh_tokens');
       }
 
-      console.log('[Auth] Lakebase migration complete');
+      logAuthEvent({
+        event: 'migration',
+        outcome: 'success',
+        durationMs: Date.now() - start,
+        extra: {
+          tables_created: tablesCreated,
+          tables_existed: Array.from(existing),
+        },
+      });
     } catch (err) {
-      console.error('[Auth] Migration failed:', (err as Error).message);
+      logAuthEvent({
+        event: 'migration',
+        outcome: 'failure',
+        errorDetail: (err as Error).message,
+        durationMs: Date.now() - start,
+        extra: {
+          tables_created_before_error: tablesCreated,
+        },
+      });
       throw err;
     }
   }
 
-  // ── Apple Token Validation ──────────────────────────────────────────
+  // ── Apple Token Validation ──────────────────────────────────────
 
   /**
    * Validate an Apple identity token (JWT from ASAuthorizationAppleIDCredential).
@@ -305,7 +347,7 @@ class AuthService {
     }
   }
 
-  // ── App JWT ─────────────────────────────────────────────────────────
+  // ── App JWT ─────────────────────────────────────────────────────
 
   /**
    * Issue an app access JWT and refresh token pair.
@@ -334,7 +376,7 @@ class AuthService {
       throw new Error('Auth service not initialized');
     }
 
-    // ── Sign access JWT ───────────────────────────────────────────────
+    // ── Sign access JWT ───────────────────────────────────────────
     const accessToken = await new SignJWT({
       device_id: deviceId,
       platform,
@@ -345,7 +387,7 @@ class AuthService {
       .setExpirationTime(ACCESS_TOKEN_EXPIRY)
       .sign(this.jwtSecret);
 
-    // ── Generate opaque refresh token ─────────────────────────────────
+    // ── Generate opaque refresh token ─────────────────────────────
     const refreshToken = crypto.randomBytes(32).toString('base64url');
     const tokenHash = this.hashToken(refreshToken);
 
@@ -399,7 +441,7 @@ class AuthService {
     }
   }
 
-  // ── Refresh Token ───────────────────────────────────────────────────
+  // ── Refresh Token ───────────────────────────────────────────────
 
   /**
    * Exchange a refresh token for a new access JWT + refresh token pair.
@@ -436,9 +478,13 @@ class AuthService {
     if (record.revoked_at) {
       // Token reuse detected — potential theft.
       // Phase 1: reject. Phase 2: revoke all tokens for this user.
-      console.warn(
-        `[Auth] Revoked refresh token reuse detected for user=${record.user_id}`,
-      );
+      logAuthEvent({
+        event: 'token_reuse_detected',
+        outcome: 'warn',
+        userId: record.user_id as string,
+        errorCode: 'TOKEN_REUSED',
+        errorDetail: 'Revoked refresh token presented — possible token theft',
+      });
       throw new TokenRevokedError('Refresh token has been revoked (possible token reuse)');
     }
 
@@ -491,11 +537,15 @@ class AuthService {
     );
 
     if (rows.length === 0) {
-      console.warn('[Auth] Revoke: token not found or already revoked');
+      logAuthEvent({
+        event: 'token_revoke',
+        outcome: 'warn',
+        errorDetail: 'Token not found or already revoked',
+      });
     }
   }
 
-  // ── User Registry (Lakebase CRUD) ───────────────────────────────────
+  // ── User Registry (Lakebase CRUD) ───────────────────────────────
 
   /**
    * Create or update a user based on Apple's `sub` claim.
@@ -561,7 +611,7 @@ class AuthService {
     );
   }
 
-  // ── Helpers ─────────────────────────────────────────────────────────
+  // ── Helpers ─────────────────────────────────────────────────────
 
   /** SHA-256 hash of a refresh token for Lakebase storage. */
   private hashToken(token: string): string {
@@ -569,7 +619,7 @@ class AuthService {
   }
 }
 
-// ── Custom error classes ──────────────────────────────────────────────
+// ── Custom error classes ──────────────────────────────────────────
 //
 // Distinct error types let route handlers and middleware map failures to
 // the correct HTTP status codes and response shapes.
@@ -598,6 +648,6 @@ export class InvalidTokenError extends Error {
   }
 }
 
-// ── Singleton export ──────────────────────────────────────────────────
+// ── Singleton export ──────────────────────────────────────────────
 
 export const authService = new AuthService();
