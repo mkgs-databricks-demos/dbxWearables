@@ -250,11 +250,64 @@ Two-layer timeout architecture prevents hung external calls from blocking client
 
 ---
 
+## Phase 2: Connect Auth to Ingest
+
+**Goal:** Wire the authenticated user identity (JWT `sub` claim = Lakebase user_id UUID) into the HealthKit ingest pipeline so the bronze table's `user_id` column contains real, validated user IDs instead of `'anonymous'`.
+
+**Key insight:** The route guard (`spn-route-guard.ts`) already validates Bearer JWTs and populates `req.auth` for all `/api/*` routes — this was implemented in Phase 1 but wasn't consumed by the ingest pipeline. Phase 2 is a 2-file change.
+
+### Changes
+
+#### 1. extract-user.ts — Replaced placeholder with req.auth?.sub
+
+**Before:** Branch 1 saw Bearer tokens but returned `'anonymous'` with a TODO comment about implementing JWT validation.
+
+**After:** Branch 1 checks `req.auth?.sub`. If the route guard (or optionalAuth) validated the JWT, `req.auth` contains the decoded `AccessTokenPayload` with `sub` = Lakebase user_id UUID. No JWT validation logic in this file — that responsibility belongs to the middleware.
+
+New priority order:
+1. `req.auth?.sub` — App JWT validated by middleware → Lakebase user_id UUID
+2. `x-forwarded-email` — Workspace traffic → email string
+3. `'anonymous'` — No auth context
+
+#### 2. ingest-routes.ts — Added optionalAuth + user_id logging
+
+- **Import:** Added `optionalAuth` from `jwt-auth.ts`
+- **Middleware chain:** `textParser → optionalAuth → handler` (defense-in-depth: short-circuits if route guard already set `req.auth`)
+- **Comment update:** User identity section reflects the new auth-aware flow
+- **Log update:** Success message now includes `user=${userId}` for operational visibility
+- **Step 4 comment:** Updated from "Extract user identity from Bearer JWT" to "Extract user identity (req.auth.sub from validated JWT, or x-forwarded-email)"
+
+### End-to-end data flow
+
+```
+iOS app
+  → Bearer JWT in Authorization header
+  → spn-route-guard.ts: verifyAccessToken(token) → req.auth = { sub, device_id, platform }
+  → optionalAuth: req.auth already set → next() (short-circuit)
+  → extractUser(req): reads req.auth.sub → returns Lakebase user_id UUID
+  → zeroBusService.buildRecord(userId=UUID)
+  → ZeroBus SDK gRPC stream
+  → Bronze table: user_id column = authenticated UUID
+```
+
+Workspace traffic follows Branch 2: `x-forwarded-email` → email string → bronze table `user_id`.
+
+### Design decisions
+
+- **No code duplication:** JWT validation lives exclusively in middleware (route guard + jwt-auth.ts). `extract-user.ts` just reads the validated result.
+- **Defense-in-depth:** `optionalAuth` is added even though the route guard already handles it. The short-circuit in `jwt-auth.ts` (`if (req.auth) { next(); return; }`) prevents double verification.
+- **No breaking changes:** Workspace traffic and anonymous callers continue to work exactly as before. Only mobile clients with valid JWTs get their real user_id instead of 'anonymous'.
+- **load-test-routes.ts benefits automatically:** It also calls `extractUser(req)`, so authenticated load test requests will get real user_ids without any code changes.
+
+---
+
 ### Files Modified
 
 | File | Changes | Lines |
 | --- | --- | --- |
 | `server/utils/timeout.ts` | **New file.** `withTimeout<T>()` generic promise deadline utility. `TimeoutError` class with `label` + `timeoutMs`. `Promise.race` with `clearTimeout`. | 0 → 88 |
+| `server/routes/zerobus/ingest-routes.ts` | Phase 2: added `optionalAuth` middleware, updated user identity comments, added `user_id` to success log | 393 → 397 |
+| `server/utils/extract-user.ts` | Phase 2: replaced Branch 1 Bearer placeholder with `req.auth?.sub` check. Removed TODO + console.info. Added auth pipeline JSDoc. | 64 → 78 |
 | `server/utils/auth-logger.ts` | **New file.** Structured JSON auth logger: `logAuthEvent()`, `hashId()` (SHA-256 prefix), `getClientIp()`. 6 event types, typed interface. | 0 → 158 |
 | `server/services/auth-service.ts` | Nonce verification, `real_user_status`, structured logging, timeouts (private `query()` helper, `withTimeout` on Apple validation + all Lakebase calls, 4 timeout constants, `TimeoutError` re-export) | 569 → 737 |
 | `server/routes/auth/auth-routes.ts` | Shared `handleAppleExchange` handler, `/apple/exchange` alias, camelCase field normalization, nonce passthrough, userId cross-check, dual-convention response, error sanitization, structured logging (17 logAuthEvent calls), timeout handling (`TimeoutError` → 504 in all 3 catch blocks, health reports `request_timeouts`) | 230 → 528 |

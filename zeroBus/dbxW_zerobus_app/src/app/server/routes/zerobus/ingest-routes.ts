@@ -38,14 +38,12 @@
 //
 // ── User identity extraction ─────────────────────────────────────
 //
-// Three-way priority for determining user_id:
+// Three-way priority for determining user_id (via extract-user.ts):
 //
-//   1. Authorization: Bearer <token> — Direct client (iOS/Android).
-//      AppKit's proxy strips this header, so if it's present the request
-//      bypassed the proxy (= mobile app calling directly). When JWT auth
-//      is implemented, this token will be validated and its `sub` claim
-//      (Lakebase user UUID) becomes the user_id. Until then, the token
-//      is logged but untrusted → 'anonymous'.
+//   1. req.auth?.sub — App-issued JWT validated by route guard or
+//      optionalAuth middleware. The `sub` claim is the Lakebase
+//      auth.users user_id UUID, set when the user signed in via Apple.
+//      This is the canonical user_id for mobile clients.
 //
 //   2. x-forwarded-email — Workspace traffic (notebook, job, service).
 //      Injected by AppKit's reverse proxy after OAuth validation. Can't
@@ -53,6 +51,10 @@
 //      Value matches Spark SQL current_user() — e.g. "user@databricks.com".
 //
 //   3. Neither — 'anonymous'. No auth context available.
+//
+// Authentication pipeline (runs before the handler):
+//   spn-route-guard.ts (global) → optionalAuth (defense-in-depth) →
+//   extractUser() reads req.auth.sub or x-forwarded-email.
 //
 // ── Record type strategy ─────────────────────────────────────────────
 //
@@ -74,6 +76,7 @@
 
 import express from 'express';
 import { extractUser } from '../../utils/extract-user.js';
+import { optionalAuth } from '../../middleware/jwt-auth.js';
 import type { Application, Request, Response, NextFunction } from 'express';
 import { zeroBusService } from '../../services/zerobus-service';
 import type { WearablesRecord } from '../../services/zerobus-service';
@@ -264,7 +267,7 @@ export async function setupZeroBusRoutes(appkit: AppKitServer) {
     // 1. Validate X-Record-Type header (any non-empty string)
     // 2. Extract NDJSON body (handles string, object, Buffer states)
     // 3. Parse NDJSON into individual JSON objects
-    // 4. Extract user identity from Bearer JWT (sub claim)
+    // 4. Extract user identity (req.auth.sub from validated JWT, or x-forwarded-email)
     // 5. Build WearablesRecord per line (UUID, timestamp, VARIANT columns)
     // 6. Batch-ingest via ZeroBus SDK stream (offset-based durability)
     // 7. Return success response with record IDs + durable confirmation
@@ -272,6 +275,7 @@ export async function setupZeroBusRoutes(appkit: AppKitServer) {
     app.post(
       '/api/v1/healthkit/ingest',
       textParser,
+      optionalAuth,  // Defense-in-depth: validates JWT if route guard missed it (short-circuits if req.auth already set)
       async (req: Request, res: Response) => {
         const startMs = Date.now();
 
@@ -336,7 +340,7 @@ export async function setupZeroBusRoutes(appkit: AppKitServer) {
 
           const durationMs = Date.now() - startMs;
           console.log(
-            `[ZeroBus] Ingested ${ingested} ${recordType} record(s) in ${durationMs}ms`,
+            `[ZeroBus] Ingested ${ingested} ${recordType} record(s) for user=${userId} in ${durationMs}ms`,
           );
 
           // — Success response ──────────────────────────────────
