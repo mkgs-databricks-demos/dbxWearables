@@ -213,15 +213,51 @@ Created a centralized `auth-logger.ts` utility that emits structured JSON log li
 - Startup/provisioning warnings kept as console.warn for dev ergonomics (alongside structured logs)
 - Migration events include `tables_created` and `tables_existed` arrays for operational visibility
 
+#### 9. Explicit Request Timeouts
+
+**Files:** `timeout.ts` (new), `auth-service.ts`, `auth-routes.ts`
+
+Two-layer timeout architecture prevents hung external calls from blocking clients:
+
+**Layer 1 — Service-level (auth-service.ts):**
+- `createRemoteJWKSet` configured with `timeoutDuration: 5000ms` for Apple JWKS HTTP fetch
+- `jwtVerify` wrapped with `withTimeout(10000ms)` for overall Apple token validation
+- All Lakebase queries routed through `private query()` helper with `withTimeout(5000ms)`
+- DDL/migration queries use longer `10000ms` timeout
+
+**Layer 2 — Route-level (auth-routes.ts):**
+- Each catch block detects `TimeoutError` via `instanceof` check
+- Maps to HTTP 504 Gateway Timeout with error code `TIMEOUT`
+- Structured log entry with `errorCode: 'TIMEOUT'` and the timeout label/duration
+- Health endpoint reports `request_timeouts: true`
+
+**Timeout constants:**
+| Constant | Value | Scope |
+| --- | --- | --- |
+| `APPLE_JWKS_FETCH_TIMEOUT_MS` | 5,000ms | jose HTTP fetch for Apple's JWKS keys |
+| `APPLE_VALIDATION_TIMEOUT_MS` | 10,000ms | Overall Apple token validation (JWKS + verify + nonce) |
+| `LAKEBASE_QUERY_TIMEOUT_MS` | 5,000ms | Individual DML/query operations |
+| `LAKEBASE_DDL_TIMEOUT_MS` | 10,000ms | CREATE TABLE, migrations (startup) |
+
+**Utility:** `timeout.ts` provides `withTimeout<T>(promise, ms, label)` using `Promise.race` with `clearTimeout` on resolution (prevents dangling timer handles). `TimeoutError` carries `label` and `timeoutMs` properties for structured logging.
+
+**Design decisions:**
+- Promise.race (not AbortSignal) — compatible with any promise API including jose and pg
+- Underlying operation NOT cancelled — continues in background (acceptable for Postgres DML)
+- Timer cleaned up on normal resolution — prevents handle leak blocking graceful shutdown
+- TimeoutError re-exported from auth-service.ts — route handlers import from single source
+- TimeoutError re-thrown without wrapping in Apple catch block — preserves instanceof check
+
 ---
 
 ### Files Modified
 
 | File | Changes | Lines |
 | --- | --- | --- |
+| `server/utils/timeout.ts` | **New file.** `withTimeout<T>()` generic promise deadline utility. `TimeoutError` class with `label` + `timeoutMs`. `Promise.race` with `clearTimeout`. | 0 → 88 |
 | `server/utils/auth-logger.ts` | **New file.** Structured JSON auth logger: `logAuthEvent()`, `hashId()` (SHA-256 prefix), `getClientIp()`. 6 event types, typed interface. | 0 → 158 |
-| `server/services/auth-service.ts` | Nonce verification in `validateAppleToken()`, `real_user_status` in `AppleTokenPayload` + return, updated JSDoc | 569 → 604 |
-| `server/routes/auth/auth-routes.ts` | Shared `handleAppleExchange` handler, `/apple/exchange` alias, camelCase field normalization, nonce passthrough, userId cross-check, dual-convention response, error message sanitization with error codes, structured JSON logging (14 logAuthEvent calls, request timing, clientIp) | 230 → 462 |
+| `server/services/auth-service.ts` | Nonce verification, `real_user_status`, structured logging, timeouts (private `query()` helper, `withTimeout` on Apple validation + all Lakebase calls, 4 timeout constants, `TimeoutError` re-export) | 569 → 737 |
+| `server/routes/auth/auth-routes.ts` | Shared `handleAppleExchange` handler, `/apple/exchange` alias, camelCase field normalization, nonce passthrough, userId cross-check, dual-convention response, error sanitization, structured logging (17 logAuthEvent calls), timeout handling (`TimeoutError` → 504 in all 3 catch blocks, health reports `request_timeouts`) | 230 → 528 |
 
 ---
 
@@ -251,7 +287,7 @@ Created a centralized `auth-logger.ts` utility that emits structured JSON log li
 
 | # | Task | Files | Status |
 | --- | --- | --- | --- |
-| 9 | Explicit request timeouts (10s on /apple, 5s on /refresh, /revoke) | `auth-routes.ts` | Deferred |
+| 9 | Explicit request timeouts (Apple JWKS, Lakebase queries, route 504) | `timeout.ts`, `auth-service.ts`, `auth-routes.ts` | **Done** |
 
 #### Deployment
 

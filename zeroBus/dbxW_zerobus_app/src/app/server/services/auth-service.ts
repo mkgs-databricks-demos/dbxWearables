@@ -28,6 +28,10 @@
 // hashed before logging. Setup warnings retain human-readable console
 // output for developer ergonomics (provisioning instructions).
 //
+// Timeouts: All external calls (Apple JWKS, Lakebase queries) are
+// wrapped with explicit deadlines via withTimeout(). Throws TimeoutError
+// on expiry, which route handlers map to HTTP 504.
+//
 // Apple JWKS endpoint (public, well-known):
 //   The service fetches Apple's public signing keys at runtime to validate
 //   identity tokens. The jose library caches keys automatically.
@@ -35,8 +39,12 @@
 import crypto from 'node:crypto';
 import { SignJWT, jwtVerify, createRemoteJWKSet, errors as joseErrors } from 'jose';
 import { logAuthEvent } from '../utils/auth-logger.js';
+import { withTimeout, TimeoutError } from '../utils/timeout.js';
 
-// ── Configuration ─────────────────────────────────────────────────
+// Re-export for route handlers (catch TimeoutError → 504)
+export { TimeoutError } from '../utils/timeout.js';
+
+// ── Configuration ─────────────────────────────────────────────────────
 
 /** Access token lifetime. Short-lived — clients use refresh tokens to renew. */
 const ACCESS_TOKEN_EXPIRY = '15m';
@@ -52,6 +60,28 @@ const APPLE_ISSUER = 'https://appleid.apple.com';
 
 /** Apple JWKS endpoint path (appended to APPLE_ISSUER). */
 const APPLE_JWKS_PATH = '/auth/keys';
+
+// ── Timeout Configuration ─────────────────────────────────────────────
+//
+// Timeouts are tuned for mobile client latency expectations:
+//   - Apple JWKS fetch is typically <500ms (cached), but the first fetch
+//     or cache-miss can take 1-3s depending on Apple CDN latency.
+//   - Lakebase queries are typically <100ms for single-row lookups, but
+//     can spike during Lakebase scaling events.
+//   - The overall Apple validation timeout covers the JWKS fetch + JWT
+//     verification + nonce check as a single deadline.
+
+/** HTTP timeout for fetching Apple's JWKS keys (passed to jose). */
+const APPLE_JWKS_FETCH_TIMEOUT_MS = 5_000;
+
+/** Overall timeout for Apple identity token validation (JWKS + verify + nonce). */
+const APPLE_VALIDATION_TIMEOUT_MS = 10_000;
+
+/** Timeout for individual Lakebase DML/query operations. */
+const LAKEBASE_QUERY_TIMEOUT_MS = 5_000;
+
+/** Timeout for Lakebase DDL operations (CREATE TABLE, migrations). */
+const LAKEBASE_DDL_TIMEOUT_MS = 10_000;
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -93,7 +123,7 @@ interface LakebaseClient {
   query(text: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
 }
 
-// ── Lakebase Migration SQL ────────────────────────────────────────
+// ── Lakebase Migration SQL ────────────────────────────────────────────
 //
 // Tables live in the `auth` schema to isolate auth data from the
 // existing `app` schema used by todo-routes.ts (sample scaffold).
@@ -142,7 +172,7 @@ const MIGRATION_SQL = {
   `,
 };
 
-// ── Service class ─────────────────────────────────────────────────
+// ── Service class ─────────────────────────────────────────────────────
 
 class AuthService {
   private lakebase: LakebaseClient | null = null;
@@ -151,7 +181,7 @@ class AuthService {
   private appleBundleId = '';
   private initialized = false;
 
-  // ── Initialization ──────────────────────────────────────────────
+  // ── Initialization ──────────────────────────────────────────────────
 
   /**
    * Initialize the auth service with the Lakebase client.
@@ -204,8 +234,11 @@ class AuthService {
 
     // Build the Apple JWKS URL from well-known components.
     // jose caches the fetched keys internally and refreshes as needed.
+    // timeoutDuration controls the HTTP fetch timeout for key retrieval.
     const appleJwksUrl = new URL(APPLE_JWKS_PATH, APPLE_ISSUER);
-    this.appleJwks = createRemoteJWKSet(appleJwksUrl);
+    this.appleJwks = createRemoteJWKSet(appleJwksUrl, {
+      timeoutDuration: APPLE_JWKS_FETCH_TIMEOUT_MS,
+    });
 
     await this.migrate();
 
@@ -221,11 +254,40 @@ class AuthService {
     return this.initialized;
   }
 
-  // ── Lakebase Migration ──────────────────────────────────────────
+  // ── Lakebase Query Helper ───────────────────────────────────────────
+
+  /**
+   * Execute a Lakebase query with a timeout deadline.
+   *
+   * Consolidates the null check and timeout wrapping for all Lakebase
+   * calls. The underlying query is NOT cancelled on timeout — it
+   * continues in Postgres, but we stop waiting and throw TimeoutError.
+   *
+   * @param sql    - SQL query string (with $1, $2, ... placeholders)
+   * @param params - Parameterized values
+   * @param label  - Descriptive label for timeout error messages
+   * @param timeoutMs - Override timeout (defaults to LAKEBASE_QUERY_TIMEOUT_MS)
+   */
+  private async query(
+    sql: string,
+    params?: unknown[],
+    label = 'Lakebase query',
+    timeoutMs = LAKEBASE_QUERY_TIMEOUT_MS,
+  ): Promise<{ rows: Record<string, unknown>[] }> {
+    if (!this.lakebase) {
+      throw new Error('Auth service not initialized');
+    }
+    return withTimeout(this.lakebase.query(sql, params), timeoutMs, label);
+  }
+
+  // ── Lakebase Migration ──────────────────────────────────────────────
 
   /**
    * Create the auth schema and tables if they don't exist.
    * Idempotent — safe to run on every app startup.
+   *
+   * Uses LAKEBASE_DDL_TIMEOUT_MS (10s) for DDL operations, which may
+   * be slower than DML on first run or during Lakebase scaling.
    */
   private async migrate(): Promise<void> {
     if (!this.lakebase) return;
@@ -234,21 +296,21 @@ class AuthService {
     const tablesCreated: string[] = [];
 
     try {
-      await this.lakebase.query(MIGRATION_SQL.createSchema);
+      await this.query(MIGRATION_SQL.createSchema, undefined, 'CREATE SCHEMA', LAKEBASE_DDL_TIMEOUT_MS);
 
-      const { rows } = await this.lakebase.query(MIGRATION_SQL.checkTables);
+      const { rows } = await this.query(MIGRATION_SQL.checkTables, undefined, 'check auth tables', LAKEBASE_DDL_TIMEOUT_MS);
       const existing = new Set(rows.map((r) => r.table_name as string));
 
       if (!existing.has('users')) {
-        await this.lakebase.query(MIGRATION_SQL.createUsers);
+        await this.query(MIGRATION_SQL.createUsers, undefined, 'CREATE auth.users', LAKEBASE_DDL_TIMEOUT_MS);
         tablesCreated.push('auth.users');
       }
       if (!existing.has('devices')) {
-        await this.lakebase.query(MIGRATION_SQL.createDevices);
+        await this.query(MIGRATION_SQL.createDevices, undefined, 'CREATE auth.devices', LAKEBASE_DDL_TIMEOUT_MS);
         tablesCreated.push('auth.devices');
       }
       if (!existing.has('refresh_tokens')) {
-        await this.lakebase.query(MIGRATION_SQL.createRefreshTokens);
+        await this.query(MIGRATION_SQL.createRefreshTokens, undefined, 'CREATE auth.refresh_tokens', LAKEBASE_DDL_TIMEOUT_MS);
         tablesCreated.push('auth.refresh_tokens');
       }
 
@@ -275,7 +337,7 @@ class AuthService {
     }
   }
 
-  // ── Apple Token Validation ──────────────────────────────────────
+  // ── Apple Token Validation ──────────────────────────────────────────
 
   /**
    * Validate an Apple identity token (JWT from ASAuthorizationAppleIDCredential).
@@ -288,12 +350,17 @@ class AuthService {
    * The `sub` claim is consistent across all of a user's devices for the
    * same Apple Developer Team ID, making it a reliable primary key.
    *
+   * Timeout: The entire validation (JWKS fetch + verify + nonce check) is
+   * wrapped in APPLE_VALIDATION_TIMEOUT_MS (10s). The JWKS HTTP fetch itself
+   * has a tighter APPLE_JWKS_FETCH_TIMEOUT_MS (5s) set on createRemoteJWKSet.
+   *
    * @param identityToken - The raw JWT string from Apple (base64url-encoded)
    * @param nonce - Optional raw nonce from the iOS client. If provided, it is
    *   SHA-256 hashed and compared to the `nonce` claim in the Apple token.
    *   Apple embeds the hash set on the ASAuthorizationAppleIDRequest; this
    *   verification prevents replay of a captured identity token.
    * @throws Error if validation fails (expired, bad signature, wrong audience, nonce mismatch)
+   * @throws TimeoutError if Apple's JWKS endpoint is unreachable within the deadline
    */
   async validateAppleToken(identityToken: string, nonce?: string): Promise<AppleTokenPayload> {
     if (!this.appleJwks) {
@@ -301,10 +368,17 @@ class AuthService {
     }
 
     try {
-      const { payload } = await jwtVerify(identityToken, this.appleJwks, {
-        issuer: APPLE_ISSUER,
-        audience: this.appleBundleId,
-      });
+      // Wrap the entire JWKS fetch + JWT verification in a single deadline.
+      // The jose JWKS function may trigger an HTTP fetch (cache miss) or use
+      // cached keys (cache hit). Either way, we enforce an overall limit.
+      const { payload } = await withTimeout(
+        jwtVerify(identityToken, this.appleJwks, {
+          issuer: APPLE_ISSUER,
+          audience: this.appleBundleId,
+        }),
+        APPLE_VALIDATION_TIMEOUT_MS,
+        'Apple token validation',
+      );
 
       if (!payload.sub) {
         throw new Error('Apple identity token missing sub claim');
@@ -337,6 +411,9 @@ class AuthService {
         real_user_status: payload.real_user_status as number | undefined,
       };
     } catch (err) {
+      // Re-throw TimeoutError as-is (don't wrap in Apple-specific message)
+      if (err instanceof TimeoutError) throw err;
+
       if (err instanceof joseErrors.JWTExpired) {
         throw new Error('Apple identity token has expired');
       }
@@ -347,7 +424,7 @@ class AuthService {
     }
   }
 
-  // ── App JWT ─────────────────────────────────────────────────────
+  // ── App JWT ─────────────────────────────────────────────────────────
 
   /**
    * Issue an app access JWT and refresh token pair.
@@ -376,7 +453,7 @@ class AuthService {
       throw new Error('Auth service not initialized');
     }
 
-    // ── Sign access JWT ───────────────────────────────────────────
+    // ── Sign access JWT ───────────────────────────────────────────────
     const accessToken = await new SignJWT({
       device_id: deviceId,
       platform,
@@ -387,17 +464,18 @@ class AuthService {
       .setExpirationTime(ACCESS_TOKEN_EXPIRY)
       .sign(this.jwtSecret);
 
-    // ── Generate opaque refresh token ─────────────────────────────
+    // ── Generate opaque refresh token ─────────────────────────────────
     const refreshToken = crypto.randomBytes(32).toString('base64url');
     const tokenHash = this.hashToken(refreshToken);
 
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRY_DAYS);
 
-    await this.lakebase.query(
+    await this.query(
       `INSERT INTO auth.refresh_tokens (token_hash, user_id, device_id, expires_at)
        VALUES ($1, $2, $3, $4)`,
       [tokenHash, userId, deviceId, expiresAt.toISOString()],
+      'insert refresh token',
     );
 
     return {
@@ -441,7 +519,7 @@ class AuthService {
     }
   }
 
-  // ── Refresh Token ───────────────────────────────────────────────
+  // ── Refresh Token ───────────────────────────────────────────────────
 
   /**
    * Exchange a refresh token for a new access JWT + refresh token pair.
@@ -463,10 +541,11 @@ class AuthService {
 
     const tokenHash = this.hashToken(refreshToken);
 
-    const { rows } = await this.lakebase.query(
+    const { rows } = await this.query(
       `SELECT user_id, device_id, expires_at, revoked_at
        FROM auth.refresh_tokens WHERE token_hash = $1`,
       [tokenHash],
+      'lookup refresh token',
     );
 
     if (rows.length === 0) {
@@ -493,15 +572,17 @@ class AuthService {
     }
 
     // Revoke the old refresh token (rotation)
-    await this.lakebase.query(
+    await this.query(
       `UPDATE auth.refresh_tokens SET revoked_at = NOW() WHERE token_hash = $1`,
       [tokenHash],
+      'revoke old refresh token',
     );
 
     // Update user last_seen_at
-    await this.lakebase.query(
+    await this.query(
       `UPDATE auth.users SET last_seen_at = NOW() WHERE user_id = $1`,
       [record.user_id],
+      'update user last_seen_at',
     );
 
     // Issue new token pair
@@ -529,11 +610,12 @@ class AuthService {
 
     const tokenHash = this.hashToken(refreshToken);
 
-    const { rows } = await this.lakebase.query(
+    const { rows } = await this.query(
       `UPDATE auth.refresh_tokens SET revoked_at = NOW()
        WHERE token_hash = $1 AND revoked_at IS NULL
        RETURNING token_hash`,
       [tokenHash],
+      'revoke refresh token',
     );
 
     if (rows.length === 0) {
@@ -545,7 +627,7 @@ class AuthService {
     }
   }
 
-  // ── User Registry (Lakebase CRUD) ───────────────────────────────
+  // ── User Registry (Lakebase CRUD) ───────────────────────────────────
 
   /**
    * Create or update a user based on Apple's `sub` claim.
@@ -562,7 +644,7 @@ class AuthService {
       throw new Error('Auth service not initialized');
     }
 
-    const { rows } = await this.lakebase.query(
+    const { rows } = await this.query(
       `INSERT INTO auth.users (apple_sub, display_name)
        VALUES ($1, $2)
        ON CONFLICT (apple_sub)
@@ -571,6 +653,7 @@ class AuthService {
          display_name = COALESCE(EXCLUDED.display_name, auth.users.display_name)
        RETURNING user_id`,
       [appleSub, displayName || null],
+      'upsert user',
     );
 
     return rows[0].user_id as string;
@@ -598,7 +681,7 @@ class AuthService {
       throw new Error('Auth service not initialized');
     }
 
-    await this.lakebase.query(
+    await this.query(
       `INSERT INTO auth.devices (device_id, user_id, platform, app_version)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (device_id)
@@ -608,10 +691,11 @@ class AuthService {
          app_version = COALESCE(EXCLUDED.app_version, auth.devices.app_version),
          last_seen_at = NOW()`,
       [deviceId, userId, platform, appVersion || null],
+      'register device',
     );
   }
 
-  // ── Helpers ─────────────────────────────────────────────────────
+  // ── Helpers ─────────────────────────────────────────────────────────
 
   /** SHA-256 hash of a refresh token for Lakebase storage. */
   private hashToken(token: string): string {
@@ -619,7 +703,7 @@ class AuthService {
   }
 }
 
-// ── Custom error classes ──────────────────────────────────────────
+// ── Custom error classes ──────────────────────────────────────────────
 //
 // Distinct error types let route handlers and middleware map failures to
 // the correct HTTP status codes and response shapes.
@@ -648,6 +732,6 @@ export class InvalidTokenError extends Error {
   }
 }
 
-// ── Singleton export ──────────────────────────────────────────────
+// ── Singleton export ──────────────────────────────────────────────────
 
 export const authService = new AuthService();

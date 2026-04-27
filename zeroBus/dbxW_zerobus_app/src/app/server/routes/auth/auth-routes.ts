@@ -26,11 +26,15 @@
 // before logging. The OTel log exporter picks these up for the
 // _otel_logs table in Unity Catalog.
 //
+// Timeouts: Service-level timeouts in auth-service.ts guard external
+// calls (Apple JWKS 10s, Lakebase queries 5s). TimeoutError is caught
+// here and mapped to HTTP 504 Gateway Timeout with code TIMEOUT.
+//
 // See auth-service.ts for the core authentication logic.
 // See spn-route-guard.ts for route-level access control.
 
 import type { Application, Request, Response } from 'express';
-import { authService } from '../../services/auth-service.js';
+import { authService, TimeoutError } from '../../services/auth-service.js';
 import { requireAuth } from '../../middleware/jwt-auth.js';
 import {
   authAppleLimiter,
@@ -47,7 +51,7 @@ interface AppKitServer {
   };
 }
 
-// ── Route registration ─────────────────────────────────────────────
+// ── Route registration ─────────────────────────────────────────────────
 
 export async function setupAuthRoutes(appkit: AppKitServer) {
   if (!authService.isReady()) {
@@ -64,7 +68,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
 
   appkit.server.extend((app) => {
 
-    // ── POST /api/v1/auth/apple ──────────────────────────────────
+    // ── POST /api/v1/auth/apple ──────────────────────────────────────
     //
     // Exchange an Apple identity token for app credentials.
     //
@@ -88,7 +92,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
     //
     // Rate limit: 10 per 15 min per IP
     // Errors: 400 (missing fields / userId mismatch), 401 (Apple validation failed),
-    //         429 (rate limited), 503 (not initialized)
+    //         429 (rate limited), 503 (not initialized), 504 (timeout)
 
     // ── Handler (shared between /apple and /apple/exchange) ──────────
 
@@ -181,13 +185,13 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
           return;
         }
 
-        // ── Upsert user (keyed on Apple's sub claim) ────────────────
+        // ── Upsert user (keyed on Apple's sub claim) ──────────────────
         const userId = await authService.upsertUser(
           applePayload.sub,
           undefined, // display_name — only available on first auth via fullName credential
         );
 
-        // ── Register device ───────────────────────────────────────
+        // ── Register device ───────────────────────────────────────────
         await authService.registerDevice(
           userId,
           deviceId,
@@ -195,7 +199,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
           appVersion,
         );
 
-        // ── Issue tokens ──────────────────────────────────────────
+        // ── Issue tokens ──────────────────────────────────────────────
         const tokens = await authService.issueTokens(
           userId,
           deviceId,
@@ -231,6 +235,26 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
 
         res.status(200).json(response);
       } catch (err) {
+        const durationMs = Date.now() - start;
+
+        // ── Timeout → 504 Gateway Timeout ─────────────────────────────
+        if (err instanceof TimeoutError) {
+          logAuthEvent({
+            event: 'apple_exchange',
+            outcome: 'failure',
+            errorCode: 'TIMEOUT',
+            errorDetail: err.message,
+            clientIp,
+            durationMs,
+          });
+          res.status(504).json({
+            status: 'error',
+            code: 'TIMEOUT',
+            message: 'Request timed out',
+          });
+          return;
+        }
+
         const detail = err instanceof Error ? err.message : String(err);
 
         // Map internal error messages to client-safe codes.
@@ -254,7 +278,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
           errorCode: code,
           errorDetail: detail,
           clientIp,
-          durationMs: Date.now() - start,
+          durationMs,
         });
 
         res.status(isValidationError ? 401 : 500).json({
@@ -269,7 +293,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
     app.post('/api/v1/auth/apple', appleLimiter, handleAppleExchange);
     app.post('/api/v1/auth/apple/exchange', appleLimiter, handleAppleExchange);
 
-    // ── POST /api/v1/auth/refresh ────────────────────────────────
+    // ── POST /api/v1/auth/refresh ────────────────────────────────────
     //
     // Exchange a refresh token for new credentials.
     // Implements token rotation: old refresh token is revoked, new one issued.
@@ -330,6 +354,26 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
 
         res.status(200).json(tokens);
       } catch (err) {
+        const durationMs = Date.now() - start;
+
+        // ── Timeout → 504 Gateway Timeout ─────────────────────────────
+        if (err instanceof TimeoutError) {
+          logAuthEvent({
+            event: 'token_refresh',
+            outcome: 'failure',
+            errorCode: 'TIMEOUT',
+            errorDetail: err.message,
+            clientIp,
+            durationMs,
+          });
+          res.status(504).json({
+            status: 'error',
+            code: 'TIMEOUT',
+            message: 'Request timed out',
+          });
+          return;
+        }
+
         const detail = err instanceof Error ? err.message : String(err);
 
         // Map to client-safe error codes — detail stays in server logs
@@ -344,7 +388,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
           errorCode: code,
           errorDetail: detail,
           clientIp,
-          durationMs: Date.now() - start,
+          durationMs,
         });
 
         res.status(401).json({
@@ -355,7 +399,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
       }
     });
 
-    // ── POST /api/v1/auth/revoke ─────────────────────────────────
+    // ── POST /api/v1/auth/revoke ─────────────────────────────────────
     //
     // Revoke a refresh token (logout).
     // Requires a valid access JWT to prevent unauthorized revocation.
@@ -417,6 +461,27 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
           message: 'Token revoked',
         });
       } catch (err) {
+        const durationMs = Date.now() - start;
+
+        // ── Timeout → 504 Gateway Timeout ─────────────────────────────
+        if (err instanceof TimeoutError) {
+          logAuthEvent({
+            event: 'token_revoke',
+            outcome: 'failure',
+            errorCode: 'TIMEOUT',
+            errorDetail: err.message,
+            userId: req.auth?.sub,
+            clientIp,
+            durationMs,
+          });
+          res.status(504).json({
+            status: 'error',
+            code: 'TIMEOUT',
+            message: 'Request timed out',
+          });
+          return;
+        }
+
         const message = err instanceof Error ? err.message : String(err);
 
         logAuthEvent({
@@ -426,7 +491,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
           errorDetail: message,
           userId: req.auth?.sub,
           clientIp,
-          durationMs: Date.now() - start,
+          durationMs,
         });
 
         res.status(500).json({
@@ -437,7 +502,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
       }
     });
 
-    // ── GET /api/v1/auth/health ──────────────────────────────────
+    // ── GET /api/v1/auth/health ──────────────────────────────────────
     //
     // Health check for the auth subsystem.
     // Reports initialization state, env var presence, and route guard config.
@@ -454,6 +519,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
         hardening: {
           route_guard: true,
           rate_limiting: true,
+          request_timeouts: true,
           spn_identity_verification: !!process.env.IOS_SPN_APPLICATION_ID,
         },
       });
