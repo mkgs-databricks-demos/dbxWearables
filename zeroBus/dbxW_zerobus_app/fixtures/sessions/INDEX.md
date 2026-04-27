@@ -2,6 +2,7 @@
 
 | Date | Session | File |
 | --- | --- | --- |
+| 2026-04-27 | Apple Auth Best Practices Audit, iOS Contract Alignment & Nonce Verification | [2026-04-27_apple-auth-alignment-nonce-verification.md](2026-04-27_apple-auth-alignment-nonce-verification.md) |
 | 2026-04-26 | deploy.sh CLI Fixes, iOS SPN Permissions & Deploy Readiness | [2026-04-26_deploy-cli-fixes-ios-spn-permissions.md](2026-04-26_deploy-cli-fixes-ios-spn-permissions.md) |
 | 2026-04-25 | JWT Authentication (Phase 1) & Security Hardening | [2026-04-25_jwt-auth-hardening.md](2026-04-25_jwt-auth-hardening.md) |
 | 2026-04-23 | Load Test History UX Refinements & Pool Size Bug Fix | [2026-04-23_load-test-history-ux-refinements.md](2026-04-23_load-test-history-ux-refinements.md) |

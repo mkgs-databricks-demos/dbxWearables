@@ -1,6 +1,7 @@
 // Auth Routes — Sign in with Apple JWT Authentication
 //
-// POST /api/v1/auth/apple   — Exchange Apple identity token for app JWT
+// POST /api/v1/auth/apple          — Exchange Apple identity token for app JWT
+// POST /api/v1/auth/apple/exchange — Alias (iOS client uses this path)
 // POST /api/v1/auth/refresh — Silent token renewal (rotate refresh token)
 // POST /api/v1/auth/revoke  — Logout (revoke refresh token)
 // GET  /api/v1/auth/health  — Auth subsystem health check
@@ -68,18 +69,24 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
     //   4. Register device (keyed on device_id from iOS Keychain)
     //   5. Issue app JWT (15 min) + refresh token (30 days)
     //
-    // Request:
-    //   { identity_token: string, device_id: string,
+    // Request (accepts both iOS camelCase and server snake_case):
+    //   { appleIdToken | identity_token: string,
+    //     deviceId | device_id: string,
+    //     nonce?: string,           — raw nonce for replay protection (CRITICAL)
+    //     userId?: string,          — Apple sub for cross-check
     //     platform?: string, app_version?: string }
     //
-    // Response (200):
-    //   { access_token, refresh_token, expires_in, token_type, user_id }
+    // Response (200) — includes both conventions for iOS + server compat:
+    //   { access_token, refresh_token, expires_in, token_type, user_id,
+    //     jwt, refreshToken, expiresIn, userId }
     //
     // Rate limit: 10 per 15 min per IP
-    // Errors: 400 (missing fields), 401 (Apple validation failed),
+    // Errors: 400 (missing fields / userId mismatch), 401 (Apple validation failed),
     //         429 (rate limited), 503 (not initialized)
 
-    app.post('/api/v1/auth/apple', appleLimiter, async (req: Request, res: Response) => {
+    // ── Handler (shared between /apple and /apple/exchange) ──────────
+
+    const handleAppleExchange = async (req: Request, res: Response) => {
       if (!authService.isReady()) {
         res.status(503).json({
           status: 'error',
@@ -89,27 +96,50 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
       }
 
       try {
-        const { identity_token, device_id, platform, app_version } = req.body || {};
+        const body = req.body || {};
+
+        // ── Normalize field names (accept iOS camelCase or snake_case) ─
+        const identityToken = body.appleIdToken || body.identity_token;
+        const deviceId      = body.deviceId     || body.device_id;
+        const nonce         = body.nonce;                              // raw nonce for replay protection
+        const clientUserId  = body.userId;                             // Apple sub for cross-check
+        const platform      = body.platform;
+        const appVersion    = body.app_version  || body.appVersion;
 
         // ── Validate required fields ──────────────────────────────────
-        if (!identity_token || typeof identity_token !== 'string') {
+        if (!identityToken || typeof identityToken !== 'string') {
           res.status(400).json({
             status: 'error',
-            message: 'Missing required field: identity_token (Apple identity JWT from ASAuthorizationAppleIDCredential)',
+            message: 'Missing required field: appleIdToken (Apple identity JWT from ASAuthorizationAppleIDCredential)',
           });
           return;
         }
 
-        if (!device_id || typeof device_id !== 'string') {
+        if (!deviceId || typeof deviceId !== 'string') {
           res.status(400).json({
             status: 'error',
-            message: 'Missing required field: device_id (DeviceIdentifier.current from iOS Keychain)',
+            message: 'Missing required field: deviceId (DeviceIdentifier.current from iOS Keychain)',
           });
           return;
         }
 
-        // ── Validate Apple identity token ─────────────────────────────
-        const applePayload = await authService.validateAppleToken(identity_token);
+        // ── Validate Apple identity token + nonce ─────────────────────
+        const applePayload = await authService.validateAppleToken(identityToken, nonce);
+
+        // ── Cross-check userId against token sub (Apple Step 4) ───────
+        // If the client sends a userId, verify it matches the validated
+        // token's sub claim. Rejects forged requests early.
+        if (clientUserId && clientUserId !== applePayload.sub) {
+          console.warn(
+            `[Auth] userId cross-check failed: client=${clientUserId.slice(0, 8)}... ` +
+            `token=${applePayload.sub.slice(0, 8)}...`,
+          );
+          res.status(400).json({
+            status: 'error',
+            message: 'userId does not match Apple identity token sub claim',
+          });
+          return;
+        }
 
         // ── Upsert user (keyed on Apple's sub claim) ──────────────────
         const userId = await authService.upsertUser(
@@ -120,38 +150,61 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
         // ── Register device ───────────────────────────────────────────
         await authService.registerDevice(
           userId,
-          device_id,
+          deviceId,
           platform || 'apple_healthkit',
-          app_version,
+          appVersion,
         );
 
         // ── Issue tokens ──────────────────────────────────────────────
         const tokens = await authService.issueTokens(
           userId,
-          device_id,
+          deviceId,
           platform || 'apple_healthkit',
         );
 
+        // ── Build response with both conventions ──────────────────────
+        // snake_case: existing server consumers (load test UI, curl)
+        // camelCase: iOS JWTExchangeResponse decoder
+        const response = {
+          // snake_case (original)
+          ...tokens,
+          // camelCase aliases for iOS compatibility
+          jwt:          tokens.access_token,
+          refreshToken: tokens.refresh_token,
+          expiresIn:    tokens.expires_in,
+          userId:       tokens.user_id,
+          tokenType:    tokens.token_type,
+        };
+
         console.log(
-          `[Auth] Apple sign-in: user=${userId} device=${device_id} ` +
-          `apple_sub=${applePayload.sub.slice(0, 8)}...`,
+          `[Auth] Apple sign-in: user=${userId} device=${deviceId} ` +
+          `apple_sub=${applePayload.sub.slice(0, 8)}...` +
+          (applePayload.real_user_status != null
+            ? ` real_user_status=${applePayload.real_user_status}`
+            : ''),
         );
 
-        res.status(200).json(tokens);
+        res.status(200).json(response);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error('[Auth] Apple auth failed:', message);
 
         // Distinguish Apple validation errors (401) from server errors (500)
         const isValidationError =
-          message.includes('Apple') || message.includes('token') || message.includes('audience');
+          message.includes('Apple') || message.includes('token') ||
+          message.includes('audience') || message.includes('nonce') ||
+          message.includes('Nonce');
 
         res.status(isValidationError ? 401 : 500).json({
           status: 'error',
           message: isValidationError ? message : 'Authentication failed',
         });
       }
-    });
+    };
+
+    // Register on both paths — iOS uses /exchange, server tests use /apple
+    app.post('/api/v1/auth/apple', appleLimiter, handleAppleExchange);
+    app.post('/api/v1/auth/apple/exchange', appleLimiter, handleAppleExchange);
 
     // ── POST /api/v1/auth/refresh ────────────────────────────────────
     //

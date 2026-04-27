@@ -63,6 +63,14 @@ export interface AppleTokenPayload {
   /** User's email — only available on first authentication. */
   email?: string;
   email_verified?: boolean;
+  /**
+   * Apple's user fraud indicator (from the identity token).
+   *   0 = unsupported (older OS)
+   *   1 = unknown
+   *   2 = likely real
+   * Only present on the *first* authorization — subsequent sign-ins omit it.
+   */
+  real_user_status?: number;
 }
 
 export interface AccessTokenPayload {
@@ -231,16 +239,21 @@ class AuthService {
    * Validate an Apple identity token (JWT from ASAuthorizationAppleIDCredential).
    *
    * Fetches Apple's public keys from their JWKS endpoint (cached by jose),
-   * verifies the RS256 signature, checks issuer + audience + expiry, and
-   * extracts the `sub` claim — Apple's stable, privacy-preserving user ID.
+   * verifies the RS256 signature, checks issuer + audience + expiry, verifies
+   * the nonce (if provided) to prevent replay attacks, and extracts the `sub`
+   * claim — Apple's stable, privacy-preserving user ID.
    *
    * The `sub` claim is consistent across all of a user's devices for the
    * same Apple Developer Team ID, making it a reliable primary key.
    *
    * @param identityToken - The raw JWT string from Apple (base64url-encoded)
-   * @throws Error if validation fails (expired, bad signature, wrong audience)
+   * @param nonce - Optional raw nonce from the iOS client. If provided, it is
+   *   SHA-256 hashed and compared to the `nonce` claim in the Apple token.
+   *   Apple embeds the hash set on the ASAuthorizationAppleIDRequest; this
+   *   verification prevents replay of a captured identity token.
+   * @throws Error if validation fails (expired, bad signature, wrong audience, nonce mismatch)
    */
-  async validateAppleToken(identityToken: string): Promise<AppleTokenPayload> {
+  async validateAppleToken(identityToken: string, nonce?: string): Promise<AppleTokenPayload> {
     if (!this.appleJwks) {
       throw new Error('Auth service not initialized');
     }
@@ -255,10 +268,31 @@ class AuthService {
         throw new Error('Apple identity token missing sub claim');
       }
 
+      // ── Nonce verification (Apple CRITICAL best practice) ───────────
+      //
+      // The iOS app generates a raw nonce, SHA-256 hashes it, and sets
+      // the hash on the ASAuthorizationAppleIDRequest. Apple embeds that
+      // hash as the `nonce` claim in the identity token. We re-hash the
+      // raw nonce from the request body and compare to prevent replay.
+      if (nonce) {
+        const expectedHash = crypto
+          .createHash('sha256')
+          .update(nonce)
+          .digest('hex');
+        const tokenNonce = payload.nonce as string | undefined;
+        if (!tokenNonce) {
+          throw new Error('Apple identity token missing nonce claim');
+        }
+        if (expectedHash !== tokenNonce) {
+          throw new Error('Nonce mismatch — possible replay attack');
+        }
+      }
+
       return {
         sub: payload.sub,
         email: payload.email as string | undefined,
         email_verified: payload.email_verified as boolean | undefined,
+        real_user_status: payload.real_user_status as number | undefined,
       };
     } catch (err) {
       if (err instanceof joseErrors.JWTExpired) {
