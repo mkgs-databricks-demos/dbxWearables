@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 /// Errors thrown by AuthService.
 enum AuthError: Error, LocalizedError {
@@ -68,11 +69,15 @@ actor AuthService: AuthProviding {
     }
 
     func bearerToken() async throws -> String {
+        let now = clock()
         if let token = cachedToken,
            let expiry = cachedExpiry,
-           expiry.timeIntervalSince(clock()) > refreshLeadTime {
+           expiry.timeIntervalSince(now) > refreshLeadTime {
+            let timeRemaining = expiry.timeIntervalSince(now)
+            Log.api.info("AuthService: Using cached OAuth token (expires in \(timeRemaining)s)")
             return token
         }
+        Log.api.info("AuthService: Cached token missing or expired, refreshing...")
         return try await refresh()
     }
 
@@ -88,10 +93,14 @@ actor AuthService: AuthProviding {
               !clientID.isEmpty,
               let clientSecret = KeychainHelper.get(for: KeychainHelper.Key.databricksClientSecret),
               !clientSecret.isEmpty else {
+            Log.api.error("AuthService: Missing or empty Databricks credentials in Keychain")
             throw AuthError.missingCredentials
         }
 
-        var request = URLRequest(url: tokenEndpoint)
+        let endpoint = tokenEndpoint
+        Log.api.info("AuthService: Requesting OAuth token from \(endpoint.absoluteString)")
+
+        var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -102,10 +111,16 @@ actor AuthService: AuthProviding {
 
         let (data, response) = try await session.data(for: request)
 
-        guard let http = response as? HTTPURLResponse,
-              (200...299).contains(http.statusCode) else {
-            let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-            throw AuthError.tokenEndpointFailed(statusCode: code)
+        guard let http = response as? HTTPURLResponse else {
+            Log.api.error("AuthService: Response is not HTTP")
+            throw AuthError.tokenEndpointFailed(statusCode: -1)
+        }
+        
+        Log.api.info("AuthService: OAuth token endpoint returned status \(http.statusCode)")
+        
+        guard (200...299).contains(http.statusCode) else {
+            Log.api.error("AuthService: OAuth token request failed with HTTP \(http.statusCode) - Response: \(String(data: data, encoding: .utf8) ?? "(unable to decode)")")
+            throw AuthError.tokenEndpointFailed(statusCode: http.statusCode)
         }
 
         struct TokenResponse: Decodable {
@@ -119,10 +134,12 @@ actor AuthService: AuthProviding {
         }
 
         guard let parsed = try? JSONDecoder().decode(TokenResponse.self, from: data) else {
+            Log.api.error("AuthService: Failed to decode OAuth token response")
             throw AuthError.invalidTokenResponse
         }
 
-        let expiresAt = clock().addingTimeInterval(TimeInterval(parsed.expiresIn))
+        let now = clock()
+        let expiresAt = now.addingTimeInterval(TimeInterval(parsed.expiresIn))
         cachedToken = parsed.accessToken
         cachedExpiry = expiresAt
 
@@ -131,6 +148,8 @@ actor AuthService: AuthProviding {
             DateFormatters.iso8601WithTimezone.string(from: expiresAt),
             for: KeychainHelper.Key.oauthAccessTokenExpiry
         )
+
+        Log.api.info("AuthService: OAuth token obtained successfully (expires in \(parsed.expiresIn)s)")
 
         return parsed.accessToken
     }
