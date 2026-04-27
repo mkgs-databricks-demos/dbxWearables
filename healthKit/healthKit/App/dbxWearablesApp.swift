@@ -16,11 +16,10 @@ struct dbxWearablesApp: App {
                         showOnboarding = true
                     }
                 }
-                .sheet(isPresented: $showOnboarding, onDismiss: {
-                    hasCompletedOnboarding = true
-                }) {
+                .fullScreenCover(isPresented: $showOnboarding) {
                     OnboardingView(
                         isPresented: $showOnboarding,
+                        hasCompletedOnboarding: $hasCompletedOnboarding,
                         healthKitManager: appDelegate.healthKitManager
                     )
                     .environmentObject(appDelegate.healthKitManager)

@@ -44,7 +44,9 @@ struct DashboardView: View {
         .navigationTitle("Dashboard")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            await viewModel.requestAuthorization()
+            // Onboarding owns the explicit HealthKit permission prompt — the
+            // dashboard only needs to load stats. Re-prompting here would race
+            // with the onboarding cover and surface the system dialog over it.
             await viewModel.loadStats()
         }
     }

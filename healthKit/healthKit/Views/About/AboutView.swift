@@ -7,6 +7,7 @@ struct AboutView: View {
     @StateObject private var demoModeManager = DemoModeManager()
     @StateObject private var signInManager = AppleSignInManager()
     @State private var permissionsViewModel: PermissionsViewModel?
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var showOnboarding = false
     @State private var showCredentialsConfig = false
     @State private var showSignIn = false
@@ -64,9 +65,10 @@ struct AboutView: View {
                     permissionsViewModel = PermissionsViewModel(healthKitManager: healthKitManager)
                 }
             }
-            .sheet(isPresented: $showOnboarding) {
+            .fullScreenCover(isPresented: $showOnboarding) {
                 OnboardingView(
                     isPresented: $showOnboarding,
+                    hasCompletedOnboarding: $hasCompletedOnboarding,
                     healthKitManager: healthKitManager
                 )
                 .environmentObject(healthKitManager)
