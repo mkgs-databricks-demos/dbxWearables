@@ -40,6 +40,7 @@ enum DeviceIdentifier {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
         SecItemAdd(query as CFDictionary, nil)
     }

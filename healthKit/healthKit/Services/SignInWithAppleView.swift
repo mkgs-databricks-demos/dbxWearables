@@ -89,6 +89,7 @@ struct SignInWithAppleContent: View {
             .signInWithAppleButtonStyle(.black)
             .frame(height: 50)
             .cornerRadius(8)
+            .accessibilityHint("Securely authenticate using your Apple ID")
 
             VStack(alignment: .leading, spacing: 12) {
                 benefitRow(icon: "lock.shield", title: "Secure", description: "Your data is protected with end-to-end encryption")
