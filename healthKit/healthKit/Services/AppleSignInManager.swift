@@ -1,6 +1,7 @@
 import Foundation
 import AuthenticationServices
 import CryptoKit
+import UIKit
 
 /// Manages Sign in with Apple authentication flow for Databricks JWT authentication.
 ///
@@ -54,6 +55,11 @@ final class AppleSignInManager: ObservableObject {
     /// can verify the SHA256 claim Apple embedded in the ID token.
     private var pendingNonce: String?
 
+    /// Block-based notification observer tokens. Block observers must be
+    /// removed by token, not by `removeObserver(self)` — that call only
+    /// matches selector-based registrations.
+    private var notificationObservers: [NSObjectProtocol] = []
+
     init(
         authService: AuthProviding = AuthService(),
         urlSession: URLSession = .shared
@@ -62,6 +68,42 @@ final class AppleSignInManager: ObservableObject {
         self.urlSession = urlSession
 
         restoreSession()
+        observeCredentialRevocation()
+        observeForegroundForCredentialCheck()
+    }
+
+    deinit {
+        notificationObservers.forEach { NotificationCenter.default.removeObserver($0) }
+    }
+
+    private func observeCredentialRevocation() {
+        let token = NotificationCenter.default.addObserver(
+            forName: ASAuthorizationAppleIDProvider.credentialRevokedNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.signOut()
+            }
+        }
+        notificationObservers.append(token)
+    }
+
+    /// Re-check Apple ID credential state every time the app returns to the
+    /// foreground. Catches revocations that happened on another device or
+    /// while the app was backgrounded (no `credentialRevokedNotification`
+    /// fires across cold starts).
+    private func observeForegroundForCredentialCheck() {
+        let token = NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                await self?.checkCredentialState()
+            }
+        }
+        notificationObservers.append(token)
     }
 
     // MARK: - Sign In (called by SignInWithAppleButton)
@@ -188,10 +230,14 @@ final class AppleSignInManager: ObservableObject {
         let expiryString = ISO8601DateFormatter().string(from: expiryDate)
         KeychainHelper.set(expiryString, for: KeychainHelper.Key.userJWTExpiry)
 
+        // Apple only provides email and fullName on the FIRST sign-in.
+        // On subsequent sign-ins, they may be nil. Preserve existing values.
+        let existingUser = currentUser
+        
         let user = AuthenticatedUser(
             userId: userId,
-            email: email,
-            fullName: fullName,
+            email: email ?? existingUser?.email,
+            fullName: fullName ?? existingUser?.fullName,
             authenticatedAt: Date(),
             jwtExpiresAt: expiryDate
         )
@@ -238,6 +284,30 @@ final class AppleSignInManager: ObservableObject {
         }
         signOut()
         throw AppleAuthError.jwtExpired
+    }
+    
+    /// Check if the user's Apple ID credential is still valid.
+    /// Should be called on app foreground and periodically during use.
+    func checkCredentialState() async {
+        guard let user = currentUser else { return }
+        
+        let provider = ASAuthorizationAppleIDProvider()
+        do {
+            let state = try await provider.credentialState(forUserID: user.userId)
+            switch state {
+            case .revoked, .notFound, .transferred:
+                // Credential is no longer usable for this app — revoked from
+                // Settings, never granted, or transferred to another Apple ID.
+                signOut()
+                authState = .error("Your Apple ID authentication is no longer valid. Please sign in again.")
+            case .authorized:
+                break
+            @unknown default:
+                break
+            }
+        } catch {
+            Log.ui.error("Failed to check Apple ID credential state: \(error)")
+        }
     }
 
     func getCurrentJWT() throws -> String {
