@@ -170,6 +170,13 @@ const MIGRATION_SQL = {
       created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `,
+
+  // Visibility: make the auth schema and its tables visible to all
+  // Lakebase roles (including the Studio UI user). Without this, only
+  // the app's SPN role (schema owner) can see the schema.
+  grantSchemaUsage: `GRANT USAGE ON SCHEMA auth TO PUBLIC`,
+  grantTableSelect: `GRANT SELECT ON ALL TABLES IN SCHEMA auth TO PUBLIC`,
+  grantDefaultSelect: `ALTER DEFAULT PRIVILEGES IN SCHEMA auth GRANT SELECT ON TABLES TO PUBLIC`,
 };
 
 // ── Service class ─────────────────────────────────────────────────────
@@ -313,6 +320,14 @@ class AuthService {
         await this.query(MIGRATION_SQL.createRefreshTokens, undefined, 'CREATE auth.refresh_tokens', LAKEBASE_DDL_TIMEOUT_MS);
         tablesCreated.push('auth.refresh_tokens');
       }
+
+      // ── Grant visibility to all Lakebase roles (idempotent) ─────────
+      // Without these grants, the auth schema is invisible in the
+      // Lakebase Studio UI because only the app's SPN (schema owner)
+      // has implicit USAGE. Safe to re-run on every startup.
+      await this.query(MIGRATION_SQL.grantSchemaUsage, undefined, 'GRANT USAGE ON SCHEMA', LAKEBASE_DDL_TIMEOUT_MS);
+      await this.query(MIGRATION_SQL.grantTableSelect, undefined, 'GRANT SELECT ON TABLES', LAKEBASE_DDL_TIMEOUT_MS);
+      await this.query(MIGRATION_SQL.grantDefaultSelect, undefined, 'GRANT DEFAULT PRIVILEGES', LAKEBASE_DDL_TIMEOUT_MS);
 
       logAuthEvent({
         event: 'migration',
