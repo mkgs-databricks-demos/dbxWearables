@@ -71,7 +71,7 @@ Plus: iOS sends `nonce` and `userId` fields the server didn't accept; server ret
 
 Audited the server implementation against Apple's 10-point backend checklist (from Xcode screenshots):
 
-**Score: 14/18 PASS, 3 PARTIAL, 1 FAIL**
+**Score: 15/18 PASS, 2 PARTIAL, 1 FAIL** (post-P1: error messages sanitized)
 
 | # | Requirement | Status |
 | --- | --- | --- |
@@ -92,7 +92,7 @@ Audited the server implementation against Apple's 10-point backend checklist (fr
 | 15 | HTTPS only | PASS (Databricks Apps enforce) |
 | 16 | Request timeouts | PARTIAL (Express defaults) |
 | 17 | Validate all input fields | PASS |
-| 18 | Generic error messages | PARTIAL (some leak validation details) |
+| 18 | Generic error messages | **PASS** (sanitized — error codes only, no detail leakage) |
 
 The nonce gap was the critical finding — without it, a captured Apple identity token could be replayed within its ~10-minute validity window.
 
@@ -155,6 +155,27 @@ tokenType:    tokens.token_type,
 **File:** `auth-service.ts`
 **Change:** `AppleTokenPayload.real_user_status` populated from Apple JWT. Logged in auth success message.
 
+
+### P1 Fix Implemented
+
+#### 7. Error Message Sanitization
+
+**File:** `auth-routes.ts`
+**Change:** Replaced 6 client-facing error messages that leaked implementation details with generic messages + machine-readable error codes.
+
+| Leaked Detail (before) | Client Message (after) | Error Code |
+| --- | --- | --- |
+| `JWT_SIGNING_SECRET not provisioned` | `Auth service not available` | `SERVICE_UNAVAILABLE` |
+| `Apple identity JWT from ASAuthorizationAppleIDCredential` | `Missing required field: appleIdToken` | `MISSING_FIELD` |
+| `DeviceIdentifier.current from iOS Keychain` | `Missing required field: deviceId` | `MISSING_FIELD` |
+| `userId does not match Apple identity token sub claim` | `Authentication failed` | `IDENTITY_MISMATCH` |
+| Raw exception (e.g. "Apple identity token has expired") | `Authentication failed` | `TOKEN_EXPIRED` / `NONCE_INVALID` / `SIGNATURE_INVALID` / `AUDIENCE_MISMATCH` / `APPLE_AUTH_FAILED` |
+| Raw refresh error (e.g. "Refresh token has been revoked") | `Token refresh failed` | `TOKEN_EXPIRED` / `TOKEN_REVOKED` / `INVALID_TOKEN` / `REFRESH_FAILED` |
+
+All detailed error messages remain in `console.error()` for server-side OTel log capture. The `code` field gives the iOS app programmatic error handling without exposing internals.
+
+**Design decision:** Error codes use `UPPER_SNAKE_CASE` constants that the iOS app can switch on. The `/refresh` endpoint already had `TOKEN_EXPIRED` and `TOKEN_REVOKED` codes — this change extends the pattern to all auth endpoints and adds `NONCE_INVALID`, `SIGNATURE_INVALID`, `AUDIENCE_MISMATCH`, `IDENTITY_MISMATCH`, `APPLE_AUTH_FAILED`, `INVALID_TOKEN`, `REFRESH_FAILED`, `MISSING_FIELD`, `SERVICE_UNAVAILABLE`, and `INTERNAL_ERROR`.
+
 ---
 
 ### Files Modified
@@ -162,7 +183,7 @@ tokenType:    tokens.token_type,
 | File | Changes | Lines |
 | --- | --- | --- |
 | `server/services/auth-service.ts` | Nonce verification in `validateAppleToken()`, `real_user_status` in `AppleTokenPayload` + return, updated JSDoc | 569 → 604 |
-| `server/routes/auth/auth-routes.ts` | Shared `handleAppleExchange` handler, `/apple/exchange` alias, camelCase field normalization, nonce passthrough, userId cross-check, dual-convention response | 230 → 326 |
+| `server/routes/auth/auth-routes.ts` | Shared `handleAppleExchange` handler, `/apple/exchange` alias, camelCase field normalization, nonce passthrough, userId cross-check, dual-convention response, error message sanitization with error codes | 230 → 332 |
 
 ---
 
@@ -181,18 +202,18 @@ tokenType:    tokens.token_type,
 
 ### Remaining Work
 
-#### P1 — Should Fix (deferred to next session)
+#### P1 — Should Fix
 
-| # | Task | Files |
-| --- | --- | --- |
-| 7 | Sanitize error messages (generic client, detailed server logs) | `auth-routes.ts` |
-| 8 | Structured JSON auth logging (hashed identifiers for OTel) | `auth-routes.ts`, `auth-service.ts` |
+| # | Task | Files | Status |
+| --- | --- | --- | --- |
+| 7 | Sanitize error messages (generic client, detailed server logs) | `auth-routes.ts` | **Done** |
+| 8 | Structured JSON auth logging (hashed identifiers for OTel) | `auth-routes.ts`, `auth-service.ts` | Deferred |
 
 #### P2 — Nice to Have
 
-| # | Task | Files |
-| --- | --- | --- |
-| 9 | Explicit request timeouts (10s on /apple, 5s on /refresh, /revoke) | `auth-routes.ts` |
+| # | Task | Files | Status |
+| --- | --- | --- | --- |
+| 9 | Explicit request timeouts (10s on /apple, 5s on /refresh, /revoke) | `auth-routes.ts` | Deferred |
 
 #### Deployment
 

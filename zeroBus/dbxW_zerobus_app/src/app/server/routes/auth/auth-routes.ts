@@ -90,7 +90,8 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
       if (!authService.isReady()) {
         res.status(503).json({
           status: 'error',
-          message: 'Auth service not available — JWT_SIGNING_SECRET not provisioned',
+          code: 'SERVICE_UNAVAILABLE',
+          message: 'Auth service not available',
         });
         return;
       }
@@ -110,7 +111,8 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
         if (!identityToken || typeof identityToken !== 'string') {
           res.status(400).json({
             status: 'error',
-            message: 'Missing required field: appleIdToken (Apple identity JWT from ASAuthorizationAppleIDCredential)',
+            code: 'MISSING_FIELD',
+            message: 'Missing required field: appleIdToken',
           });
           return;
         }
@@ -118,7 +120,8 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
         if (!deviceId || typeof deviceId !== 'string') {
           res.status(400).json({
             status: 'error',
-            message: 'Missing required field: deviceId (DeviceIdentifier.current from iOS Keychain)',
+            code: 'MISSING_FIELD',
+            message: 'Missing required field: deviceId',
           });
           return;
         }
@@ -136,7 +139,8 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
           );
           res.status(400).json({
             status: 'error',
-            message: 'userId does not match Apple identity token sub claim',
+            code: 'IDENTITY_MISMATCH',
+            message: 'Authentication failed',
           });
           return;
         }
@@ -186,18 +190,28 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
 
         res.status(200).json(response);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error('[Auth] Apple auth failed:', message);
+        const detail = err instanceof Error ? err.message : String(err);
+        console.error('[Auth] Apple auth failed:', detail);
 
-        // Distinguish Apple validation errors (401) from server errors (500)
+        // Map internal error messages to client-safe codes.
+        // Detailed messages stay in server logs only.
         const isValidationError =
-          message.includes('Apple') || message.includes('token') ||
-          message.includes('audience') || message.includes('nonce') ||
-          message.includes('Nonce');
+          detail.includes('Apple') || detail.includes('token') ||
+          detail.includes('audience') || detail.includes('nonce') ||
+          detail.includes('Nonce');
+
+        const code = detail.includes('expired')  ? 'TOKEN_EXPIRED'
+                   : detail.includes('Nonce')     ? 'NONCE_INVALID'
+                   : detail.includes('nonce')     ? 'NONCE_INVALID'
+                   : detail.includes('signature') ? 'SIGNATURE_INVALID'
+                   : detail.includes('audience')  ? 'AUDIENCE_MISMATCH'
+                   : isValidationError             ? 'APPLE_AUTH_FAILED'
+                   :                                 'INTERNAL_ERROR';
 
         res.status(isValidationError ? 401 : 500).json({
           status: 'error',
-          message: isValidationError ? message : 'Authentication failed',
+          code,
+          message: 'Authentication failed',
         });
       }
     };
@@ -220,6 +234,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
       if (!authService.isReady()) {
         res.status(503).json({
           status: 'error',
+          code: 'SERVICE_UNAVAILABLE',
           message: 'Auth service not available',
         });
         return;
@@ -231,6 +246,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
         if (!refresh_token || typeof refresh_token !== 'string') {
           res.status(400).json({
             status: 'error',
+            code: 'MISSING_FIELD',
             message: 'Missing required field: refresh_token',
           });
           return;
@@ -241,16 +257,19 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
         console.log(`[Auth] Token refreshed: user=${tokens.user_id}`);
         res.status(200).json(tokens);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error('[Auth] Refresh failed:', message);
+        const detail = err instanceof Error ? err.message : String(err);
+        console.error('[Auth] Refresh failed:', detail);
 
-        // All refresh failures are 401 — the client should re-authenticate
+        // Map to client-safe error codes — detail stays in server logs
+        const code = detail.includes('expired') ? 'TOKEN_EXPIRED'
+                   : detail.includes('revoked') ? 'TOKEN_REVOKED'
+                   : detail.includes('Invalid') ? 'INVALID_TOKEN'
+                   :                               'REFRESH_FAILED';
+
         res.status(401).json({
           status: 'error',
-          message,
-          // Help the client distinguish "re-auth needed" from "try again later"
-          ...(message.includes('expired') && { code: 'TOKEN_EXPIRED' }),
-          ...(message.includes('revoked') && { code: 'TOKEN_REVOKED' }),
+          code,
+          message: 'Token refresh failed',
         });
       }
     });
@@ -266,6 +285,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
       if (!authService.isReady()) {
         res.status(503).json({
           status: 'error',
+          code: 'SERVICE_UNAVAILABLE',
           message: 'Auth service not available',
         });
         return;
@@ -277,6 +297,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
         if (!refresh_token || typeof refresh_token !== 'string') {
           res.status(400).json({
             status: 'error',
+            code: 'MISSING_FIELD',
             message: 'Missing required field: refresh_token',
           });
           return;
@@ -295,6 +316,7 @@ export async function setupAuthRoutes(appkit: AppKitServer) {
 
         res.status(500).json({
           status: 'error',
+          code: 'INTERNAL_ERROR',
           message: 'Token revocation failed',
         });
       }
