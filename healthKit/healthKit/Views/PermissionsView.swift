@@ -2,7 +2,13 @@ import SwiftUI
 
 /// Guides the user through HealthKit authorization with an explanation of why each data type is needed.
 struct PermissionsView: View {
-    @StateObject private var viewModel = PermissionsViewModel()
+    @StateObject private var viewModel: PermissionsViewModel
+
+    init(healthKitManager: HealthKitManager) {
+        self._viewModel = StateObject(
+            wrappedValue: PermissionsViewModel(healthKitManager: healthKitManager)
+        )
+    }
 
     var body: some View {
         VStack(spacing: 24) {

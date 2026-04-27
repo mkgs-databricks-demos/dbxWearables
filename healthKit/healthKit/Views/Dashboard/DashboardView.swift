@@ -2,7 +2,10 @@ import SwiftUI
 
 /// Main dashboard tab showing sync controls, category stats, and recent activity.
 struct DashboardView: View {
-    @StateObject private var viewModel = DashboardViewModel()
+    @EnvironmentObject private var healthKitManager: HealthKitManager
+    @EnvironmentObject private var syncCoordinator: SyncCoordinator
+    
+    @State private var viewModel: DashboardViewModel?
 
     private let gridColumns = [
         GridItem(.flexible(), spacing: 12),
@@ -11,29 +14,46 @@ struct DashboardView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    heroHeader
-                    syncSection
-                    categoryGrid
-                    recentActivitySection
-                }
-                .padding(.horizontal)
-                .padding(.bottom, 20)
+            if let viewModel {
+                dashboardContent(viewModel: viewModel)
+            } else {
+                ProgressView()
+                    .onAppear {
+                        self.viewModel = DashboardViewModel(
+                            healthKitManager: healthKitManager,
+                            syncCoordinator: syncCoordinator
+                        )
+                    }
             }
-            .background(DBXColors.dbxLightGray)
-            .navigationTitle("Dashboard")
-            .navigationBarTitleDisplayMode(.inline)
-            .task {
-                await viewModel.requestAuthorization()
-                await viewModel.loadStats()
+        }
+    }
+    
+    @ViewBuilder
+    private func dashboardContent(viewModel: DashboardViewModel) -> some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                heroHeader(viewModel: viewModel)
+                syncSection(viewModel: viewModel)
+                categoryGrid(viewModel: viewModel)
+                recentActivitySection(viewModel: viewModel)
             }
+            .padding(.horizontal)
+            .padding(.bottom, 20)
+        }
+        .background(DBXColors.dbxLightGray)
+        .navigationTitle("Dashboard")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            // Onboarding owns the explicit HealthKit permission prompt — the
+            // dashboard only needs to load stats. Re-prompting here would race
+            // with the onboarding cover and surface the system dialog over it.
+            await viewModel.loadStats()
         }
     }
 
     // MARK: - Hero Header
 
-    private var heroHeader: some View {
+    private func heroHeader(viewModel: DashboardViewModel) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             DatabricksWordmark(size: 16)
 
@@ -63,18 +83,19 @@ struct DashboardView: View {
 
     // MARK: - Sync Section
 
-    private var syncSection: some View {
+    private func syncSection(viewModel: DashboardViewModel) -> some View {
         SyncStatusCard(
-            isSyncing: viewModel.isSyncing,
-            lastSyncDate: viewModel.lastSyncDate,
-            lastSyncRecordCount: viewModel.lastSyncRecordCount,
-            onSync: { Task { await viewModel.syncNow() } }
+            syncStatus: syncCoordinator.syncStatus,
+            lastSyncDate: syncCoordinator.lastSyncDate,
+            lastSyncRecordCount: syncCoordinator.lastSyncRecordCount,
+            onSync: { Task { await viewModel.syncNow() } },
+            onRetry: { Task { await viewModel.syncNow() } }
         )
     }
 
     // MARK: - Category Grid
 
-    private var categoryGrid: some View {
+    private func categoryGrid(viewModel: DashboardViewModel) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Data Sent")
                 .font(DBXTypography.sectionHeader)
@@ -111,7 +132,7 @@ struct DashboardView: View {
 
     // MARK: - Recent Activity
 
-    private var recentActivitySection: some View {
+    private func recentActivitySection(viewModel: DashboardViewModel) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Recent Activity")
                 .font(DBXTypography.sectionHeader)

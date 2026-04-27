@@ -1,40 +1,10 @@
 import XCTest
 @testable import dbxWearablesApp
 
-// MARK: - Mock URL Protocol
-
-/// Intercepts all URL requests made through the session, returning controlled responses.
-private final class MockURLProtocol: URLProtocol {
-
-    /// Set this before each test to control the response for intercepted requests.
-    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
-
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        guard let handler = Self.requestHandler else {
-            client?.urlProtocol(self, didFailWithError: URLError(.unknown))
-            return
-        }
-        do {
-            let (response, data) = try handler(request)
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: data)
-            client?.urlProtocolDidFinishLoading(self)
-        } catch {
-            client?.urlProtocol(self, didFailWithError: error)
-        }
-    }
-
-    override func stopLoading() {}
-}
-
-// MARK: - Tests
-
 final class APIServiceTests: XCTestCase {
 
     private var sut: APIService!
+    private var mockAuth: MockAuthService!
 
     override func setUp() {
         super.setUp()
@@ -44,11 +14,13 @@ final class APIServiceTests: XCTestCase {
 
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockURLProtocol.self]
-        sut = APIService(session: URLSession(configuration: config))
+        mockAuth = MockAuthService(token: "test-token-abc")
+        sut = APIService(session: URLSession(configuration: config), auth: mockAuth)
     }
 
     override func tearDown() {
         sut = nil
+        mockAuth = nil
         MockURLProtocol.requestHandler = nil
         super.tearDown()
     }
@@ -140,6 +112,59 @@ final class APIServiceTests: XCTestCase {
         }
     }
 
+    // MARK: - 401 Refresh-Retry
+
+    func testPostPayloadRetriesOnceAfter401AndInvalidatesToken() async throws {
+        // First response is 401, second is 200.
+        var callCount = 0
+        let json = #"{"status":"ok"}"#
+
+        MockURLProtocol.requestHandler = { request in
+            callCount += 1
+            let statusCode = (callCount == 1) ? 401 : 200
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: statusCode, httpVersion: nil, headerFields: nil
+            )!
+            return (response, Data(json.utf8))
+        }
+
+        let response = try await sut.postRecords([makeSample()], recordType: "samples")
+
+        XCTAssertEqual(response.status, "ok")
+        XCTAssertEqual(callCount, 2, "Expected exactly two HTTP calls (401 then 200)")
+
+        let invalidateCount = await mockAuth.invalidateCallCount
+        XCTAssertEqual(invalidateCount, 1, "Cached token should be invalidated once on 401")
+
+        let bearerCount = await mockAuth.bearerCallCount
+        XCTAssertEqual(bearerCount, 2, "Bearer token should be fetched twice (one per attempt)")
+    }
+
+    func testPostPayloadDoesNotRetryAgainIfSecond401() async {
+        var callCount = 0
+
+        MockURLProtocol.requestHandler = { request in
+            callCount += 1
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil
+            )!
+            return (response, Data())
+        }
+
+        do {
+            _ = try await sut.postRecords([makeSample()], recordType: "samples")
+            XCTFail("Expected APIError.httpError to be thrown on persistent 401")
+        } catch let error as APIError {
+            guard case .httpError(let statusCode) = error else {
+                return XCTFail("Wrong APIError case")
+            }
+            XCTAssertEqual(statusCode, 401)
+            XCTAssertEqual(callCount, 2, "Should retry exactly once on 401, then surface the error")
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
     // MARK: - Request Headers
 
     func testPostPayloadIncludesExpectedHeaders() async throws {
@@ -166,10 +191,6 @@ final class APIServiceTests: XCTestCase {
     }
 
     func testPostPayloadIncludesAuthorizationHeader() async throws {
-        // Store a test token so APIService picks it up via KeychainHelper.
-        KeychainHelper.saveAPIToken("test-token-abc")
-        defer { KeychainHelper.saveAPIToken("") }
-
         var capturedRequest: URLRequest?
         let json = #"{"status":"ok"}"#
 
@@ -213,7 +234,7 @@ final class APIServiceTests: XCTestCase {
         let json = #"{"status":"ok"}"#
 
         MockURLProtocol.requestHandler = { request in
-            capturedBody = request.httpBody
+            capturedBody = Self.readBody(from: request)
             let response = HTTPURLResponse(
                 url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil
             )!
@@ -239,6 +260,26 @@ final class APIServiceTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// URLSession converts `httpBody` to `httpBodyStream` when routing through a
+    /// custom `URLProtocol`, so reading `request.httpBody` returns nil. Drain the
+    /// stream instead.
+    static func readBody(from request: URLRequest) -> Data {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return Data() }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        let bufferSize = 4096
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+        while stream.hasBytesAvailable {
+            let read = stream.read(buffer, maxLength: bufferSize)
+            if read <= 0 { break }
+            data.append(buffer, count: read)
+        }
+        return data
+    }
 
     private func makeSample(uuid: String = "A1B2C3D4-0001-0000-0000-000000000000") -> HealthSample {
         HealthSample(

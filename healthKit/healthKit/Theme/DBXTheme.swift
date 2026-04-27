@@ -91,20 +91,3 @@ extension View {
     }
 }
 
-// MARK: - Databricks Wordmark
-
-/// Stylized "databricks" text using brand colors as a placeholder logo.
-struct DatabricksWordmark: View {
-    var size: CGFloat = 20
-
-    var body: some View {
-        HStack(spacing: 2) {
-            Text("data")
-                .font(.system(size: size, weight: .light))
-                .foregroundStyle(.white)
-            Text("bricks")
-                .font(.system(size: size, weight: .bold))
-                .foregroundStyle(DBXColors.dbxRed)
-        }
-    }
-}

@@ -1,18 +1,22 @@
 import UIKit
+import OSLog
 
 /// Drives the Data Explorer tab — per-category breakdowns and aggregation stats.
 @MainActor
 final class DataExplorerViewModel: ObservableObject {
 
+    var syncLedger: SyncLedger
+
     @Published var stats: SyncStats = .empty
 
-    private var appDelegate: AppDelegate {
-        UIApplication.shared.delegate as! AppDelegate
+    init(syncLedger: SyncLedger) {
+        self.syncLedger = syncLedger
     }
 
     func loadStats() async {
-        let ledger = appDelegate.syncCoordinator.syncLedger
-        stats = await ledger.getStats()
+        print("📊 DataExplorerViewModel: loadStats() called")
+        stats = await syncLedger.getStats()
+        print("📊 DataExplorerViewModel: Loaded stats - totalRecordsSent: \(stats.totalRecordsSent)")
     }
 
     /// Summary rows for the top-level list.

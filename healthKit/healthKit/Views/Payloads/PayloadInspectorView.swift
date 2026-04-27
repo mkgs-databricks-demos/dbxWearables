@@ -3,29 +3,55 @@ import SwiftUI
 /// Tab 3: Inspect the last-sent NDJSON payload per record type.
 /// Terminal-aesthetic dark viewer for demo verification.
 struct PayloadInspectorView: View {
-    @StateObject private var viewModel = PayloadInspectorViewModel()
+    @EnvironmentObject private var syncCoordinator: SyncCoordinator
+    @StateObject private var viewModel: PayloadInspectorViewModel
     @State private var showCopiedToast = false
+    @State private var isVisible = false
+    
+    init() {
+        // Create with a temporary SyncLedger - will be replaced in task
+        _viewModel = StateObject(wrappedValue: PayloadInspectorViewModel(syncLedger: SyncLedger()))
+    }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                categoryPicker
-                    .padding()
-
-                if let payload = viewModel.lastPayload {
-                    metadataBanner(payload)
-                        .padding(.horizontal)
-                        .padding(.bottom, 8)
-                    ndjsonViewer
-                } else {
-                    emptyState
+            payloadInspectorContent(viewModel: viewModel)
+                .task {
+                    // Replace the dummy syncLedger with the real one
+                    viewModel.syncLedger = syncCoordinator.syncLedger
+                    await viewModel.loadPayload()
                 }
+        }
+    }
+    
+    @ViewBuilder
+    private func payloadInspectorContent(viewModel: PayloadInspectorViewModel) -> some View {
+        VStack(spacing: 0) {
+            categoryPicker(viewModel: viewModel)
+                .padding()
+
+            if let payload = viewModel.lastPayload {
+                metadataBanner(payload)
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
+                ndjsonViewer(viewModel: viewModel)
+            } else {
+                emptyState
             }
-            .background(DBXColors.dbxLightGray)
-            .navigationTitle("Payloads")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+        }
+        .id(viewModel.selectedRecordType) // Force view refresh when selection changes
+        .background(DBXColors.dbxLightGray)
+        .navigationTitle("Payloads")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 12) {
+                    Button {
+                        Task { await viewModel.loadPayload() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    
                     Button {
                         viewModel.copyPayloadToClipboard()
                         showCopiedToast = true
@@ -38,45 +64,81 @@ struct PayloadInspectorView: View {
                     .disabled(viewModel.lastPayload == nil)
                 }
             }
-            .overlay(alignment: .top) {
-                if showCopiedToast {
-                    copiedToast
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
+        }
+        .overlay(alignment: .top) {
+            if showCopiedToast {
+                copiedToast
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
-            .task {
-                await viewModel.loadPayload()
+        }
+        .refreshable {
+            await viewModel.loadPayload()
+        }
+        .onAppear {
+            isVisible = true
+            Task { await viewModel.loadPayload() }
+        }
+        .onDisappear {
+            isVisible = false
+        }
+        .onChange(of: syncCoordinator.lastSyncDate) { _, _ in
+            // Reload payload whenever a sync completes
+            if isVisible {
+                Task { await viewModel.loadPayload() }
             }
         }
     }
 
     // MARK: - Category Picker
 
-    private var categoryPicker: some View {
+    private func categoryPicker(viewModel: PayloadInspectorViewModel) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(PayloadInspectorViewModel.recordTypes, id: \.self) { type in
-                    Button {
-                        viewModel.selectedRecordType = type
-                        Task { await viewModel.loadPayload() }
-                    } label: {
-                        Text(displayName(for: type))
-                            .font(.system(size: 13, weight: .medium))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(
-                                viewModel.selectedRecordType == type
-                                    ? DBXColors.dbxRed
-                                    : DBXColors.dbxCardBackground
-                            )
-                            .foregroundStyle(
-                                viewModel.selectedRecordType == type ? .white : .primary
-                            )
-                            .clipShape(Capsule())
-                    }
+                    categoryButton(for: type, viewModel: viewModel)
                 }
             }
+            .padding(.horizontal, 4)
         }
+    }
+    
+    private func categoryButton(for type: String, viewModel: PayloadInspectorViewModel) -> some View {
+        let isSelected = viewModel.selectedRecordType == type
+        let hasData = viewModel.hasPayload(for: type)
+        
+        return Button {
+            print("🔘 Tapped button for: \(type)")
+            print("   Current selected: \(viewModel.selectedRecordType)")
+            print("   Has data: \(hasData)")
+            viewModel.selectedRecordType = type
+            print("   New selected: \(viewModel.selectedRecordType)")
+            Task { 
+                await viewModel.loadPayload()
+                print("   Payload loaded for: \(type)")
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(displayName(for: type))
+                    .font(.system(size: 13, weight: .medium))
+                
+                // Show badge if this type has data
+                if hasData {
+                    Circle()
+                        .fill(isSelected ? .white : DBXColors.dbxGreen)
+                        .frame(width: 6, height: 6)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                isSelected ? DBXColors.dbxRed : DBXColors.dbxCardBackground
+            )
+            .foregroundStyle(
+                isSelected ? .white : .primary
+            )
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Metadata Banner
@@ -121,7 +183,7 @@ struct PayloadInspectorView: View {
 
     // MARK: - NDJSON Viewer
 
-    private var ndjsonViewer: some View {
+    private func ndjsonViewer(viewModel: PayloadInspectorViewModel) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(viewModel.parsedLines) { line in
@@ -134,7 +196,7 @@ struct PayloadInspectorView: View {
             }
             .padding()
         }
-        .background(DBXColors.dbxNavy)
+        .background(DBXGradients.heroHeader)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal)
         .padding(.bottom)
