@@ -4,17 +4,30 @@ import SwiftUI
 /// Can be re-shown from the About tab.
 struct OnboardingView: View {
     @Binding var isPresented: Bool
+    @Binding var hasCompletedOnboarding: Bool
     @EnvironmentObject private var healthKitManager: HealthKitManager
     @StateObject private var permissionsViewModel: PermissionsViewModel
     @State private var currentPage = 0
 
     private let totalPages = 4
 
-    init(isPresented: Binding<Bool>, healthKitManager: HealthKitManager) {
+    init(
+        isPresented: Binding<Bool>,
+        hasCompletedOnboarding: Binding<Bool>,
+        healthKitManager: HealthKitManager
+    ) {
         self._isPresented = isPresented
+        self._hasCompletedOnboarding = hasCompletedOnboarding
         self._permissionsViewModel = StateObject(
             wrappedValue: PermissionsViewModel(healthKitManager: healthKitManager)
         )
+    }
+
+    /// Mark onboarding complete and dismiss. Only callable from a successful
+    /// terminal step — never from a swipe/drag/incidental dismissal.
+    private func finishOnboarding() {
+        hasCompletedOnboarding = true
+        isPresented = false
     }
 
     var body: some View {
@@ -168,7 +181,7 @@ struct OnboardingView: View {
 
             if permissionsViewModel.isAuthorized {
                 Button("Get Started") {
-                    isPresented = false
+                    finishOnboarding()
                 }
                 .buttonStyle(DBXPrimaryButtonStyle(isFullWidth: true))
                 .padding(.horizontal, 24)
@@ -187,13 +200,15 @@ struct OnboardingView: View {
                     .padding(.horizontal, 32)
             }
 
+            #if DEBUG
             if !permissionsViewModel.isAuthorized {
-                Button("Skip for Now") {
-                    isPresented = false
+                Button("Skip for Now (DEBUG)") {
+                    finishOnboarding()
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             }
+            #endif
 
             Spacer()
         }
