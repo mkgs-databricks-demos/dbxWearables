@@ -1,16 +1,69 @@
 import SwiftUI
 
-/// Production-ready credentials configuration view for entering Databricks
-/// workspace coordinates and service-principal credentials.
-///
-/// A single QR scan can switch the entire workspace context — base URL,
-/// workspace host, and SPN — letting Databricks demoers move between
-/// workspaces without rebuilding. URLs persist to UserDefaults via
-/// `WorkspaceConfig`; secrets persist to the iOS Keychain.
-///
-/// Available in both DEBUG and RELEASE builds, accessible from About tab.
+/// Sheet wrapper around `CredentialsConfigForm` for the About tab. Owns the
+/// `NavigationStack`, Cancel/Save toolbar, and auto-dismiss-on-save behavior.
 struct CredentialsConfigView: View {
     @Environment(\.dismiss) private var dismiss
+    @State private var canSave: Bool = false
+    @State private var triggerSave: Int = 0
+
+    var body: some View {
+        NavigationStack {
+            CredentialsConfigForm(
+                layout: .sheet,
+                canSave: $canSave,
+                triggerSave: $triggerSave,
+                onSaveCompleted: {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        dismiss()
+                    }
+                }
+            )
+            .navigationTitle("API Credentials")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") { triggerSave += 1 }
+                        .fontWeight(.semibold)
+                        .disabled(!canSave)
+                }
+            }
+        }
+    }
+}
+
+/// Reusable credentials/workspace configuration form. Used by the About tab's
+/// sheet wrapper and embedded in onboarding.
+///
+/// The two layouts:
+/// - `.sheet` — full Form with current-workspace card, instructions, manual
+///   inputs, status, and security info. Save is driven by the parent toolbar.
+/// - `.onboarding` — QR-first hero CTA, scan-result confirmation, manual entry
+///   collapsed inside a DisclosureGroup. Save runs implicitly on QR scan; the
+///   onboarding "Next" gate observes Keychain/WorkspaceConfig directly.
+struct CredentialsConfigForm: View {
+    enum Layout {
+        case sheet
+        case onboarding
+    }
+
+    let layout: Layout
+
+    /// Lets the parent toolbar (sheet layout) reflect input validity.
+    @Binding var canSave: Bool
+
+    /// Increment from the parent to request a save (sheet layout). The form
+    /// observes the value and runs `save()` whenever it changes. Onboarding
+    /// layout doesn't need this — it auto-saves after a successful scan.
+    @Binding var triggerSave: Int
+
+    /// Called after a successful save. Sheet layout uses this to schedule the
+    /// auto-dismiss; onboarding ignores it (the gate flips and the user
+    /// advances when they're ready).
+    var onSaveCompleted: () -> Void = {}
 
     @State private var clientID: String = ""
     @State private var clientSecret: String = ""
@@ -19,6 +72,7 @@ struct CredentialsConfigView: View {
     @State private var workspaceLabelInput: String = ""
     @State private var showClientSecret = false
     @State private var showAdvancedURLs = false
+    @State private var showManualEntry = false
     @State private var saveStatus: SaveStatus = .idle
     @State private var showDeleteConfirmation = false
     @State private var showQRScanner = false
@@ -34,43 +88,179 @@ struct CredentialsConfigView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                currentWorkspaceSection
-                instructionsSection
-                credentialsInputSection
-                workspaceURLsSection
-                actionsSection
-                currentStatusSection
-                securityInfoSection
+        Group {
+            switch layout {
+            case .sheet:
+                sheetForm
+            case .onboarding:
+                onboardingForm
             }
-            .navigationTitle("API Credentials")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Save") { save() }
-                        .fontWeight(.semibold)
-                        .disabled(!canSave)
-                }
+        }
+        .alert("Delete Credentials", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) { deleteCredentials() }
+        } message: {
+            Text("Delete the stored credentials and workspace URLs? You'll need to re-scan or re-enter them to sync data.")
+        }
+        .fullScreenCover(isPresented: $showQRScanner) {
+            QRCodeScannerView { scan in
+                handleQRScan(scan)
             }
-            .alert("Delete Credentials", isPresented: $showDeleteConfirmation) {
-                Button("Cancel", role: .cancel) { }
-                Button("Delete", role: .destructive) { deleteCredentials() }
-            } message: {
-                Text("Delete the stored credentials and workspace URLs? You'll need to re-scan or re-enter them to sync data.")
-            }
-            .fullScreenCover(isPresented: $showQRScanner) {
-                QRCodeScannerView { scan in
-                    handleQRScan(scan)
-                }
-            }
+        }
+        .onChange(of: triggerSave) { _, _ in
+            save()
+        }
+        .onChange(of: clientID) { _, _ in updateCanSave() }
+        .onChange(of: clientSecret) { _, _ in updateCanSave() }
+        .onChange(of: saveStatus) { _, _ in updateCanSave() }
+        .onAppear { updateCanSave() }
+    }
+
+    // MARK: - Sheet form (today's full Form layout)
+
+    private var sheetForm: some View {
+        Form {
+            currentWorkspaceSection
+            instructionsSection
+            credentialsInputSection
+            workspaceURLsSection
+            actionsSection
+            currentStatusSection
+            securityInfoSection
         }
     }
 
-    // MARK: - Current Workspace
+    // MARK: - Onboarding form (QR-first)
+
+    private var onboardingForm: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                onboardingHeader
+                onboardingScanCTA
+                if isConfigured {
+                    onboardingScanResultCard
+                }
+                onboardingManualEntryDisclosure
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+
+    private var onboardingHeader: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "qrcode")
+                .font(.system(size: 48))
+                .foregroundStyle(DBXColors.dbxRed)
+
+            Text("Connect to Databricks")
+                .font(.title2)
+                .fontWeight(.bold)
+
+            Text("Scan your workspace QR code to configure credentials in one step. Or enter them manually below.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
+        }
+        .padding(.top, 8)
+    }
+
+    private var onboardingScanCTA: some View {
+        Button {
+            showQRScanner = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "qrcode.viewfinder")
+                    .font(.title2)
+                Text(isConfigured ? "Scan a Different Workspace" : "Scan Workspace QR Code")
+                    .fontWeight(.semibold)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity)
+            .background(DBXColors.dbxRed)
+            .foregroundStyle(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var onboardingScanResultCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(DBXColors.dbxGreen)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Workspace Configured")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    Text(currentLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("API Base URL")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(currentBaseURLDisplay)
+                    .font(.caption)
+                    .fontDesign(.monospaced)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Text("Tap **Next** to continue.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .id(configRevision)
+    }
+
+    private var onboardingManualEntryDisclosure: some View {
+        DisclosureGroup(isExpanded: $showManualEntry) {
+            VStack(alignment: .leading, spacing: 16) {
+                clientIDField
+                clientSecretField
+                onboardingURLFields
+                Button {
+                    save()
+                } label: {
+                    Text("Save Credentials")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(DBXPrimaryButtonStyle(isFullWidth: true))
+                .disabled(!canSave)
+
+                saveStatusMessage
+            }
+            .padding(.top, 12)
+        } label: {
+            HStack {
+                Image(systemName: "keyboard")
+                    .foregroundStyle(DBXColors.dbxRed)
+                Text("Or enter manually")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+            }
+        }
+        .padding(16)
+        .background(Color.white.opacity(0.6))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    // MARK: - Current Workspace (sheet only)
 
     private var currentWorkspaceSection: some View {
         Section {
@@ -120,7 +310,7 @@ struct CredentialsConfigView: View {
         }
     }
 
-    // MARK: - Instructions
+    // MARK: - Instructions (sheet only)
 
     private var instructionsSection: some View {
         Section {
@@ -169,84 +359,14 @@ struct CredentialsConfigView: View {
         }
     }
 
-    // MARK: - Credentials Input
+    // MARK: - Credentials Input (sheet)
 
     private var credentialsInputSection: some View {
         Section {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Client ID")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                TextField("abc123-def456-ghi789", text: $clientID)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.asciiCapable)
-                    .textContentType(.username)
-                    .fontDesign(.monospaced)
-                    .onChange(of: clientID) { _, _ in
-                        saveStatus = .idle
-                    }
-            }
-            .padding(.vertical, 4)
+            clientIDField
+            clientSecretField
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Client Secret")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        showClientSecret.toggle()
-                    } label: {
-                        Image(systemName: showClientSecret ? "eye.slash.fill" : "eye.fill")
-                            .font(.caption)
-                            .foregroundStyle(DBXColors.dbxRed)
-                    }
-                }
-
-                if showClientSecret {
-                    TextField("dapi••••••••••••", text: $clientSecret)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.asciiCapable)
-                        .textContentType(.password)
-                        .fontDesign(.monospaced)
-                        .onChange(of: clientSecret) { _, _ in
-                            saveStatus = .idle
-                        }
-                } else {
-                    SecureField("dapi••••••••••••", text: $clientSecret)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.asciiCapable)
-                        .textContentType(.password)
-                        .fontDesign(.monospaced)
-                        .onChange(of: clientSecret) { _, _ in
-                            saveStatus = .idle
-                        }
-                }
-            }
-            .padding(.vertical, 4)
-
-            if case .saved = saveStatus {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(DBXColors.dbxGreen)
-                    Text("Credentials saved successfully")
-                        .font(.caption)
-                        .foregroundStyle(DBXColors.dbxGreen)
-                }
-            }
-
-            if case .error(let message) = saveStatus {
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-            }
+            saveStatusMessage
         } header: {
             Text("Credentials")
         } footer: {
@@ -254,46 +374,96 @@ struct CredentialsConfigView: View {
         }
     }
 
-    // MARK: - Workspace URLs (manual fallback)
+    // MARK: - Field building blocks (shared)
+
+    private var clientIDField: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Client ID")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("abc123-def456-ghi789", text: $clientID)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.asciiCapable)
+                .textContentType(.username)
+                .fontDesign(.monospaced)
+                .onChange(of: clientID) { _, _ in
+                    saveStatus = .idle
+                }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var clientSecretField: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Client Secret")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    showClientSecret.toggle()
+                } label: {
+                    Image(systemName: showClientSecret ? "eye.slash.fill" : "eye.fill")
+                        .font(.caption)
+                        .foregroundStyle(DBXColors.dbxRed)
+                }
+            }
+
+            if showClientSecret {
+                TextField("dapi••••••••••••", text: $clientSecret)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.asciiCapable)
+                    .textContentType(.password)
+                    .fontDesign(.monospaced)
+                    .onChange(of: clientSecret) { _, _ in
+                        saveStatus = .idle
+                    }
+            } else {
+                SecureField("dapi••••••••••••", text: $clientSecret)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.asciiCapable)
+                    .textContentType(.password)
+                    .fontDesign(.monospaced)
+                    .onChange(of: clientSecret) { _, _ in
+                        saveStatus = .idle
+                    }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private var saveStatusMessage: some View {
+        if case .saved = saveStatus {
+            HStack {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(DBXColors.dbxGreen)
+                Text("Credentials saved successfully")
+                    .font(.caption)
+                    .foregroundStyle(DBXColors.dbxGreen)
+            }
+        }
+
+        if case .error(let message) = saveStatus {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    // MARK: - Workspace URLs (sheet)
 
     private var workspaceURLsSection: some View {
         Section {
             DisclosureGroup(isExpanded: $showAdvancedURLs) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("API Base URL")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("https://<ws>.databricksapps.com/<app>", text: $apiBaseURLInput)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                        .fontDesign(.monospaced)
-                        .onChange(of: apiBaseURLInput) { _, _ in saveStatus = .idle }
-                }
-                .padding(.vertical, 4)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Workspace Host")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("https://<ws>.cloud.databricks.com", text: $workspaceHostInput)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                        .fontDesign(.monospaced)
-                        .onChange(of: workspaceHostInput) { _, _ in saveStatus = .idle }
-                }
-                .padding(.vertical, 4)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Label (optional)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("e.g. Field Eng Demo", text: $workspaceLabelInput)
-                        .autocorrectionDisabled()
-                        .onChange(of: workspaceLabelInput) { _, _ in saveStatus = .idle }
-                }
-                .padding(.vertical, 4)
+                workspaceURLFieldsBody
             } label: {
                 HStack {
                     Image(systemName: "link")
@@ -308,7 +478,54 @@ struct CredentialsConfigView: View {
         }
     }
 
-    // MARK: - Actions
+    private var workspaceURLFieldsBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("API Base URL")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("https://<ws>.databricksapps.com/<app>", text: $apiBaseURLInput)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                    .fontDesign(.monospaced)
+                    .onChange(of: apiBaseURLInput) { _, _ in saveStatus = .idle }
+            }
+            .padding(.vertical, 4)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Workspace Host")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("https://<ws>.cloud.databricks.com", text: $workspaceHostInput)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                    .fontDesign(.monospaced)
+                    .onChange(of: workspaceHostInput) { _, _ in saveStatus = .idle }
+            }
+            .padding(.vertical, 4)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Label (optional)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("e.g. Field Eng Demo", text: $workspaceLabelInput)
+                    .autocorrectionDisabled()
+                    .onChange(of: workspaceLabelInput) { _, _ in saveStatus = .idle }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    /// Onboarding-flavored URL fields (no DisclosureGroup wrapper).
+    private var onboardingURLFields: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            workspaceURLFieldsBody
+        }
+    }
+
+    // MARK: - Actions (sheet)
 
     private var actionsSection: some View {
         Section {
@@ -325,7 +542,7 @@ struct CredentialsConfigView: View {
         }
     }
 
-    // MARK: - Current Status
+    // MARK: - Current Status (sheet)
 
     private var currentStatusSection: some View {
         Section {
@@ -376,7 +593,7 @@ struct CredentialsConfigView: View {
         }
     }
 
-    // MARK: - Security Info
+    // MARK: - Security Info (sheet)
 
     private var securityInfoSection: some View {
         Section {
@@ -408,10 +625,14 @@ struct CredentialsConfigView: View {
 
     // MARK: - Derived
 
-    private var canSave: Bool {
+    private var canSaveLocal: Bool {
         !clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !clientSecret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         saveStatus != .saving
+    }
+
+    private func updateCanSave() {
+        canSave = canSaveLocal
     }
 
     private var isConfigured: Bool {
@@ -506,10 +727,7 @@ struct CredentialsConfigView: View {
         saveStatus = .saved
         configRevision += 1
 
-        // Auto-dismiss after 1.5 seconds
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            dismiss()
-        }
+        onSaveCompleted()
     }
 
     private func deleteCredentials() {

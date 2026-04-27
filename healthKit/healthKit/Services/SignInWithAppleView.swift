@@ -1,69 +1,70 @@
 import SwiftUI
 import AuthenticationServices
 
-/// Sign in with Apple view for user authentication.
-///
-/// Shows:
-/// - Sign in with Apple button
-/// - Current auth status
-/// - User info when authenticated
-/// - Sign out option
+/// Sheet wrapper around `SignInWithAppleContent`, used from the About tab.
+/// The onboarding flow embeds `SignInWithAppleContent` directly to avoid
+/// double-stacking nav bars and toolbars.
 struct SignInWithAppleView: View {
     @StateObject private var signInManager = AppleSignInManager()
     @Environment(\.dismiss) private var dismiss
-    
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
-                    headerSection
-                    
-                    switch signInManager.authState {
-                    case .unauthenticated:
-                        unauthenticatedView
-                    case .signingIn:
-                        signingInView
-                    case .authenticated:
-                        authenticatedView
-                    case .error(let message):
-                        errorView(message)
-                    }
-                    
-                    explanationSection
-                }
-                .padding()
+                SignInWithAppleContent(signInManager: signInManager)
+                    .padding()
             }
             .background(DBXColors.dbxLightGray)
             .navigationTitle("Sign In")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    if signInManager.authState.isAuthenticated {
-                        Button("Done") {
-                            dismiss()
-                        }
-                    } else {
-                        Button("Cancel") {
-                            dismiss()
-                        }
+                    Button(signInManager.authState.isAuthenticated ? "Done" : "Cancel") {
+                        dismiss()
                     }
                 }
             }
         }
     }
-    
+}
+
+/// Reusable content view for the Sign in with Apple flow. Accepts an injected
+/// `AppleSignInManager` so the onboarding flow's gate can observe the same
+/// instance that drives the button.
+struct SignInWithAppleContent: View {
+    @ObservedObject var signInManager: AppleSignInManager
+
+    var body: some View {
+        VStack(spacing: 24) {
+            headerSection
+
+            switch signInManager.authState {
+            case .unauthenticated:
+                unauthenticatedView
+            case .signingIn:
+                signingInView
+            case .authenticated:
+                authenticatedView
+            case .error(let message):
+                errorView(message)
+            }
+
+            explanationSection
+        }
+    }
+
     // MARK: - Header
-    
+
     private var headerSection: some View {
         VStack(spacing: 12) {
             Image(systemName: signInManager.authState.isAuthenticated ? "person.crop.circle.fill.badge.checkmark" : "person.crop.circle.badge.questionmark")
                 .font(.system(size: 60))
                 .foregroundStyle(signInManager.authState.isAuthenticated ? DBXColors.dbxGreen : DBXColors.dbxRed)
-            
+
             Text(signInManager.authState.isAuthenticated ? "Authenticated" : "Sign In Required")
                 .font(.title2)
                 .fontWeight(.bold)
-            
+
             Text(signInManager.authState.isAuthenticated ?
                  "Your session is active and secure." :
                  "Sign in with your Apple ID to sync health data.")
@@ -73,9 +74,9 @@ struct SignInWithAppleView: View {
         }
         .padding(.vertical)
     }
-    
+
     // MARK: - Unauthenticated
-    
+
     private var unauthenticatedView: some View {
         VStack(spacing: 20) {
             SignInWithAppleButton(.signIn) { request in
@@ -88,7 +89,7 @@ struct SignInWithAppleView: View {
             .signInWithAppleButtonStyle(.black)
             .frame(height: 50)
             .cornerRadius(8)
-            
+
             VStack(alignment: .leading, spacing: 12) {
                 benefitRow(icon: "lock.shield", title: "Secure", description: "Your data is protected with end-to-end encryption")
                 benefitRow(icon: "person.badge.shield.checkmark", title: "Private", description: "Apple doesn't track your activity")
@@ -99,13 +100,13 @@ struct SignInWithAppleView: View {
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
     }
-    
+
     private func benefitRow(icon: String, title: String, description: String) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .foregroundStyle(DBXColors.dbxRed)
                 .frame(width: 24)
-            
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.subheadline)
@@ -116,23 +117,23 @@ struct SignInWithAppleView: View {
             }
         }
     }
-    
+
     // MARK: - Signing In
-    
+
     private var signingInView: some View {
         VStack(spacing: 20) {
             ProgressView()
                 .scaleEffect(1.5)
-            
+
             Text("Signing in...")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
         .frame(height: 200)
     }
-    
+
     // MARK: - Authenticated
-    
+
     private var authenticatedView: some View {
         VStack(spacing: 20) {
             if let user = signInManager.currentUser {
@@ -142,16 +143,16 @@ struct SignInWithAppleView: View {
                             .font(.title3)
                             .fontWeight(.semibold)
                     }
-                    
+
                     if let email = user.email {
                         Text(email)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
-                    
+
                     Divider()
                         .padding(.vertical, 8)
-                    
+
                     HStack {
                         Label("Session expires", systemImage: "clock")
                             .font(.caption)
@@ -166,7 +167,7 @@ struct SignInWithAppleView: View {
                 .background(Color.white)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
-            
+
             Button(role: .destructive) {
                 signInManager.signOut()
             } label: {
@@ -179,23 +180,23 @@ struct SignInWithAppleView: View {
             .buttonStyle(DBXSecondaryButtonStyle())
         }
     }
-    
+
     // MARK: - Error
-    
+
     private func errorView(_ message: String) -> some View {
         VStack(spacing: 20) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 48))
                 .foregroundStyle(.red)
-            
+
             Text("Sign In Failed")
                 .font(.headline)
-            
+
             Text(message)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            
+
             Button {
                 signInManager.resetForRetry()
             } label: {
@@ -211,24 +212,24 @@ struct SignInWithAppleView: View {
         .background(Color.white)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
-    
+
     // MARK: - Explanation
-    
+
     private var explanationSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Why Sign In?")
                 .font(.subheadline)
                 .fontWeight(.semibold)
-            
+
             Text("Your Apple ID is used to create a secure session with Databricks. This ensures that only you can upload your health data.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            
+
             Text("Technical Details")
                 .font(.subheadline)
                 .fontWeight(.semibold)
                 .padding(.top, 8)
-            
+
             VStack(alignment: .leading, spacing: 8) {
                 technicalDetail("1", "Apple authenticates your identity")
                 technicalDetail("2", "App exchanges Apple token for Databricks JWT")
@@ -242,7 +243,7 @@ struct SignInWithAppleView: View {
         .background(Color.white.opacity(0.5))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
-    
+
     private func technicalDetail(_ number: String, _ text: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Text(number + ".")
@@ -252,9 +253,9 @@ struct SignInWithAppleView: View {
             Text(text)
         }
     }
-    
+
     // MARK: - Helpers
-    
+
     private func formatName(_ components: PersonNameComponents) -> String {
         let formatter = PersonNameComponentsFormatter()
         formatter.style = .default
