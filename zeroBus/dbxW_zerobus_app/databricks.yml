@@ -124,7 +124,7 @@ variables:
   #   databricks secrets put-secret dbxw_zerobus_credentials jwt_signing_secret \
   #     --string-value "$(openssl rand -base64 32)"
   #   databricks secrets put-secret dbxw_zerobus_credentials apple_bundle_id \
-  #     --string-value "com.dbxwearables.healthKit"
+  #     --string-value "com.dbxwearables.dbxWearablesApp"
   #   databricks secrets put-secret dbxw_zerobus_credentials ios_spn_application_id \
   #     --string-value "<spn-application-id-uuid>"
 

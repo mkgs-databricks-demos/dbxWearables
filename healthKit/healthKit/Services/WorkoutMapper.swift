@@ -125,6 +125,11 @@ extension HKWorkoutActivityType {
         case .swimBikeRun:             return "swim_bike_run"
         case .transition:              return "transition"
         case .underwaterDiving:        return "underwater_diving"
+        case .danceInspiredTraining:   return "dance_inspired_training"
+        case .mixedMetabolicCardioTraining: return "mixed_metabolic_cardio_training"
+        case .discSports:              return "disc_sports"
+        case .cardioDance:             return "cardio_dance"
+        case .socialDance:             return "social_dance"
         case .other:                   return "other"
         @unknown default:              return "unknown_\(rawValue)"
         }

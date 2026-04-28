@@ -1,12 +1,19 @@
 // JWT Authentication Middleware
 //
-// Extracts and validates Bearer tokens from the Authorization header.
-// Used by auth-routes.ts (protecting /revoke) and will be used by
-// ingest-routes.ts in Phase 2 to validate mobile client identity.
+// Validates app-issued JWTs and populates req.auth with decoded claims.
+// Used by auth-routes.ts (protecting /revoke) and ingest-routes.ts
+// (user identity attribution for mobile clients).
 //
 // Two modes:
-//   requireAuth  — returns 401 if token is missing or invalid
+//   requireAuth  — returns 401 if no valid token is present
 //   optionalAuth — attaches user info if present, continues without error if missing
+//
+// Token sources (checked in order):
+//   1. req.auth (already set by SPN route guard — skip re-verification)
+//   2. Authorization: Bearer <token> (direct JWT or workspace user)
+//   3. X-User-JWT: <token> (user identity envelope for SPN-authenticated
+//      mobile requests — the SPN token goes in Authorization for sidecar
+//      auth, and the app JWT rides in this custom header)
 //
 // Request augmentation:
 //   On successful validation, req.auth is populated with the decoded
@@ -46,7 +53,7 @@ declare global {
   }
 }
 
-// ── Middleware exports ─────────────────────────────────────────────────
+// ── Middleware exports ───────────────────────────────────────────────
 
 /**
  * Required JWT authentication middleware.
@@ -65,7 +72,12 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
  * Attaches user info if a valid token is present, but allows
  * unauthenticated requests to proceed.
  *
- * Usage (Phase 2 — ingest route):
+ * Checks Authorization header first, then X-User-JWT header.
+ * The X-User-JWT header is used by SPN-authenticated mobile clients
+ * that send the SPN OAuth token in Authorization (for sidecar auth)
+ * and the app JWT in X-User-JWT (for user identity).
+ *
+ * Usage:
  *   app.post('/api/v1/healthkit/ingest', optionalAuth, handler);
  *   // handler checks req.auth?.sub — falls back to x-forwarded-email or 'anonymous'
  */
@@ -73,7 +85,7 @@ export function optionalAuth(req: Request, res: Response, next: NextFunction): v
   void authenticateRequest(req, res, next, false);
 }
 
-// ── Implementation ────────────────────────────────────────────────────
+// ── Implementation ──────────────────────────────────────────────────
 
 async function authenticateRequest(
   req: Request,
@@ -104,51 +116,88 @@ async function authenticateRequest(
     return;
   }
 
-  // ── Extract Bearer token ────────────────────────────────────────
+  // ── Source 1: Authorization Bearer token ─────────────────────────
   const authHeader = req.headers['authorization'];
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    if (required) {
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.slice(7);
+    const result = await tryVerifyToken(token);
+    if (result.ok) {
+      req.auth = result.payload;
+      next();
+      return;
+    }
+    // For required auth, reject on expired token from Authorization header
+    if (required && result.expired) {
       res.status(401).json({
         status: 'error',
-        message: 'Missing or invalid Authorization header. Expected: Bearer <token>',
+        message: 'Access token expired',
+        code: 'TOKEN_EXPIRED',
       });
       return;
     }
-    next();
-    return;
+    if (required && result.invalid) {
+      // Don't reject yet — fall through to check X-User-JWT.
+      // The Authorization header might be a SPN OAuth token (not our JWT).
+    }
   }
 
-  const token = authHeader.slice(7); // Remove 'Bearer ' prefix
-
-  // ── Verify token ────────────────────────────────────────────────
-  try {
-    const payload = await authService.verifyAccessToken(token);
-    req.auth = payload;
-    next();
-  } catch (err) {
-    if (err instanceof TokenExpiredError) {
+  // ── Source 2: X-User-JWT header ─────────────────────────────────
+  //
+  // SPN-authenticated mobile requests carry the Databricks SPN OAuth
+  // token in Authorization (for sidecar auth) and the app-issued JWT
+  // in X-User-JWT (for user identity). The sidecar strips/replaces
+  // Authorization but passes through custom headers untouched.
+  const userJwtHeader = req.headers['x-user-jwt'];
+  if (typeof userJwtHeader === 'string' && userJwtHeader.length > 0) {
+    const result = await tryVerifyToken(userJwtHeader);
+    if (result.ok) {
+      req.auth = result.payload;
+      next();
+      return;
+    }
+    // X-User-JWT present but invalid/expired — log for visibility
+    if (result.expired) {
+      console.warn('[JWT] X-User-JWT token expired');
       if (required) {
         res.status(401).json({
           status: 'error',
-          message: 'Access token expired',
+          message: 'User JWT expired',
           code: 'TOKEN_EXPIRED',
         });
         return;
       }
-      // Optional: expired token = no auth, continue
-      next();
-      return;
+    } else {
+      console.warn('[JWT] X-User-JWT token invalid');
     }
+  }
 
-    if (required) {
-      res.status(401).json({
-        status: 'error',
-        message: 'Invalid access token',
-      });
-      return;
+  // ── No valid token found ───────────────────────────────────────
+  if (required) {
+    res.status(401).json({
+      status: 'error',
+      message: 'Missing or invalid authentication. Send app JWT in Authorization or X-User-JWT header.',
+    });
+    return;
+  }
+
+  // Optional auth — continue without user info
+  next();
+}
+
+// ── Token verification helper ───────────────────────────────────────
+
+type VerifyResult =
+  | { ok: true; payload: AccessTokenPayload; expired?: false; invalid?: false }
+  | { ok: false; payload?: undefined; expired: boolean; invalid: boolean };
+
+async function tryVerifyToken(token: string): Promise<VerifyResult> {
+  try {
+    const payload = await authService.verifyAccessToken(token);
+    return { ok: true, payload };
+  } catch (err) {
+    if (err instanceof TokenExpiredError) {
+      return { ok: false, expired: true, invalid: false };
     }
-
-    // Optional auth — continue without user info
-    next();
+    return { ok: false, expired: false, invalid: true };
   }
 }

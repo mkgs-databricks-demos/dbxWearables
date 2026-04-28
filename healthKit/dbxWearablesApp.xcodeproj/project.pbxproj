@@ -53,6 +53,10 @@
 		9DFC0BC9AE087939B9D1DA36 /* HealthKitConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FA0E004A7DC1F76DDD5E912 /* HealthKitConfiguration.swift */; };
 		9F7B8A20F98F58FA629FE69F /* SyncRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 183B7B186EF23731B9CA9104 /* SyncRecord.swift */; };
 		A08FEBF6AA3B60852D88280A /* SPNCredentialsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06D5EC77EA32591331F745E1 /* SPNCredentialsView.swift */; };
+		A1B2C3D40000000000000001 /* WorkspaceConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000002 /* WorkspaceConfig.swift */; };
+		A1B2C3D40000000000000003 /* WorkspaceConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000004 /* WorkspaceConfigTests.swift */; };
+		A1B2C3D40000000000000005 /* AppleSignInManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000006 /* AppleSignInManagerTests.swift */; };
+		A1B2C3D40000000000000007 /* DemoModeManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000008 /* DemoModeManagerTests.swift */; };
 		A2CE00199C94EBEC587CDD5C /* MockAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 113902C3534F838C3958E426 /* MockAuthService.swift */; };
 		A315330B316FD82CBF175ECD /* SyncLedgerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F34E82891476B1380F5DB270 /* SyncLedgerTests.swift */; };
 		A3C10B16F6078F8494C6BE3E /* HealthKitTestDataGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD036AA41B487C57D1735DEC /* HealthKitTestDataGenerator.swift */; };
@@ -86,10 +90,6 @@
 		F8EC68682DB640DCB8FB539B /* NDJSONSerializerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C97F568D0D1D9A7CF94AAD6 /* NDJSONSerializerTests.swift */; };
 		FBE13AAA5A0730612AA55D8F /* DataFlowDiagramView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6541C1C01BE4D815B50FD43E /* DataFlowDiagramView.swift */; };
 		FD0B59DD5642BE88458893DD /* SyncLedger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 880FCBB261A8729153A8D0A3 /* SyncLedger.swift */; };
-		A1B2C3D40000000000000001 /* WorkspaceConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000002 /* WorkspaceConfig.swift */; };
-		A1B2C3D40000000000000003 /* WorkspaceConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000004 /* WorkspaceConfigTests.swift */; };
-		A1B2C3D40000000000000005 /* AppleSignInManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000006 /* AppleSignInManagerTests.swift */; };
-		A1B2C3D40000000000000007 /* DemoModeManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000008 /* DemoModeManagerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -108,6 +108,19 @@
 			remoteInfo = dbxWearablesApp;
 		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		D6A69D062FA08BA700DD4B85 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		06D5EC77EA32591331F745E1 /* SPNCredentialsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SPNCredentialsView.swift; sourceTree = "<group>"; };
@@ -164,6 +177,10 @@
 		9311559C832439DB413932EB /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitManager.swift; sourceTree = "<group>"; };
 		96361ED1262DD03E8B73A12E /* APIConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIConfiguration.swift; sourceTree = "<group>"; };
 		98E44EDA0C1626F60C6FEFB4 /* SleepMapperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepMapperTests.swift; sourceTree = "<group>"; };
+		A1B2C3D40000000000000002 /* WorkspaceConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceConfig.swift; sourceTree = "<group>"; };
+		A1B2C3D40000000000000004 /* WorkspaceConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceConfigTests.swift; sourceTree = "<group>"; };
+		A1B2C3D40000000000000006 /* AppleSignInManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInManagerTests.swift; sourceTree = "<group>"; };
+		A1B2C3D40000000000000008 /* DemoModeManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoModeManagerTests.swift; sourceTree = "<group>"; };
 		A40B889676C253240A5633B4 /* HealthKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = HealthKit.framework; path = System/Library/Frameworks/HealthKit.framework; sourceTree = SDKROOT; };
 		A51E647E8F52AA1B43AB14B1 /* PayloadInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadInspectorView.swift; sourceTree = "<group>"; };
 		A857A58F181C55BD46FD2DE5 /* HealthKitQueryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitQueryService.swift; sourceTree = "<group>"; };
@@ -179,6 +196,7 @@
 		D601FF122F9E22DA0085B0A5 /* DemoMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoMode.swift; sourceTree = "<group>"; };
 		D601FF142F9E365C0085B0A5 /* AppleSignInManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInManager.swift; sourceTree = "<group>"; };
 		D601FF162F9E36860085B0A5 /* SignInWithAppleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInWithAppleView.swift; sourceTree = "<group>"; };
+		D6A69CFA2FA08BA700DD4B85 /* AuthenticationServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AuthenticationServices.framework; path = System/Library/Frameworks/AuthenticationServices.framework; sourceTree = SDKROOT; };
 		D81665B1BF0B72B2D44A7074 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		D9250064D72B4E14040C6036 /* SyncStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStatusTests.swift; sourceTree = "<group>"; };
 		DBF2E89473E3121C279F1A1A /* DeletionRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeletionRecord.swift; sourceTree = "<group>"; };
@@ -192,11 +210,15 @@
 		F1A8DB7F7F1C9A1A4604648E /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		F34E82891476B1380F5DB270 /* SyncLedgerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncLedgerTests.swift; sourceTree = "<group>"; };
 		F3A23CB44A42ED967C70BD6F /* dbxWearablesApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = dbxWearablesApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A1B2C3D40000000000000002 /* WorkspaceConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceConfig.swift; sourceTree = "<group>"; };
-		A1B2C3D40000000000000004 /* WorkspaceConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceConfigTests.swift; sourceTree = "<group>"; };
-		A1B2C3D40000000000000006 /* AppleSignInManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInManagerTests.swift; sourceTree = "<group>"; };
-		A1B2C3D40000000000000008 /* DemoModeManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoModeManagerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		D6A69CFC2FA08BA700DD4B85 /* dbxWearables */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = dbxWearables;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		6E38A496FAAC85305A54E426 /* Frameworks */ = {
@@ -406,6 +428,7 @@
 				3E72E98C7532E473385F1D78 /* healthKit */,
 				5C3DCFB25E9C9F856F3C284A /* healthKitTests */,
 				B07E2D1B30AC2B664B7DEEEF /* healthKitUITests */,
+				D6A69CFC2FA08BA700DD4B85 /* dbxWearables */,
 				F36485B8BA76F4BF2BD6322A /* Frameworks */,
 				FD04E1CE78E9FDF274B7AD22 /* Products */,
 			);
@@ -480,6 +503,7 @@
 			isa = PBXGroup;
 			children = (
 				A40B889676C253240A5633B4 /* HealthKit.framework */,
+				D6A69CFA2FA08BA700DD4B85 /* AuthenticationServices.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -520,6 +544,7 @@
 				DD9B29883955BEA5995B924B /* Sources */,
 				C00101A33BD28D542478BB5C /* Resources */,
 				6E38A496FAAC85305A54E426 /* Frameworks */,
+				D6A69D062FA08BA700DD4B85 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
@@ -575,10 +600,10 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
+				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
 					4204B045AB0FCED2D70B74DD = {
-						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 					B2727529B4A5C513C6AA74C1 = {
@@ -750,6 +775,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = healthKit/Entitlements/dbxWearablesApp.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 83376EYALS;
 				INFOPLIST_FILE = healthKit/App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -903,6 +929,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = healthKit/Entitlements/dbxWearablesApp.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 83376EYALS;
 				INFOPLIST_FILE = healthKit/App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (

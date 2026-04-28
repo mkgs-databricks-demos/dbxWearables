@@ -883,12 +883,35 @@ struct AboutView: View {
                     .foregroundStyle(DBXColors.dbxGreen)
                     .font(.caption)
             }
+            
+            HStack {
+                Image(systemName: "network")
+                    .foregroundStyle(DBXColors.dbxRed)
+                    .frame(width: 24)
+                Text("OAuth Token")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if hasOAuthToken {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(DBXColors.dbxGreen)
+                        .font(.caption)
+                } else {
+                    Text("Not cached")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            }
         }
     }
     
     private var credentialsConfigured: Bool {
         KeychainHelper.exists(for: KeychainHelper.Key.databricksClientID) &&
         KeychainHelper.exists(for: KeychainHelper.Key.databricksClientSecret)
+    }
+    
+    private var hasOAuthToken: Bool {
+        KeychainHelper.exists(for: KeychainHelper.Key.oauthAccessToken)
     }
     
     private func openAppSettings() {

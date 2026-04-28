@@ -115,11 +115,35 @@ final class AppleSignInManager: ObservableObject {
     /// claim — letting the server verify origin without the raw nonce ever
     /// touching Apple.
     func prepareRequest(_ request: ASAuthorizationAppleIDRequest) {
+        Log.ui.info("Sign in with Apple: Preparing request...")
+        
+        // Log configuration status for debugging
+        Log.ui.info("Sign in with Apple: API Base URL configured: \(APIConfiguration.configuredBaseURL?.absoluteString ?? "NOT SET")")
+        Log.ui.info("Sign in with Apple: Workspace Host configured: \(APIConfiguration.configuredWorkspaceHost?.absoluteString ?? "NOT SET")")
+        
+        let credentials = checkOAuthCredentials()
+        Log.ui.info("Sign in with Apple: Client ID in keychain: \(credentials.hasClientID) (length: \(credentials.clientIDLength))")
+        Log.ui.info("Sign in with Apple: Client Secret in keychain: \(credentials.hasClientSecret) (length: \(credentials.secretLength))")
+        
+        if credentials.hasClientID && credentials.hasClientSecret {
+            Log.ui.info("Sign in with Apple: ✅ OAuth credentials appear valid")
+        } else {
+            Log.ui.warning("Sign in with Apple: ⚠️ OAuth credentials may be incomplete")
+        }
+        
         let nonce = Self.generateNonce()
         pendingNonce = nonce
         request.requestedScopes = [.fullName, .email]
         request.nonce = Self.sha256(nonce)
-        authState = .signingIn
+        // NOTE: do NOT flip `authState = .signingIn` here. SwiftUI's
+        // `SignInWithAppleButton` is backed by an `ASAuthorizationController`
+        // whose delegate is the button's coordinator. Switching state would
+        // unmount the button (the `.unauthenticated` arm) while Apple's
+        // system sheet is still presented — deallocating the coordinator and
+        // silently dropping the `onCompletion` callback. Apple's own sheet
+        // provides feedback during the auth flow; we transition to
+        // `.signingIn` only once we receive a credential to exchange.
+        Log.ui.info("Sign in with Apple: Request prepared, presenting Apple UI...")
     }
 
     /// Handle the result of the native Sign in with Apple flow.
@@ -128,22 +152,92 @@ final class AppleSignInManager: ObservableObject {
 
         switch result {
         case .failure(let error):
-            authState = .error(error.localizedDescription)
+            let nsError = error as NSError
+            Log.ui.error("Sign in with Apple failed: \(error.localizedDescription)")
+            Log.ui.error("Sign in with Apple error domain: \(nsError.domain), code: \(nsError.code)")
+            
+            // Log underlying error if available
+            if let underlyingError = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
+                Log.ui.error("Underlying error domain: \(underlyingError.domain), code: \(underlyingError.code)")
+            }
+            
+            // Provide better error messages for common issues
+            let userMessage: String
+            if nsError.domain == "com.apple.AuthenticationServices.AuthorizationError" {
+                switch nsError.code {
+                case 1000:
+                    // Code 1000 is "unknown" - often masks underlying AKAuthenticationError
+                    if let underlyingError = nsError.userInfo[NSUnderlyingErrorKey] as? NSError,
+                       underlyingError.domain == "AKAuthenticationError" && underlyingError.code == -7026 {
+                        #if targetEnvironment(simulator)
+                        userMessage = "Sign in with Apple requires a properly configured Apple ID in Settings.\n\nTip: This error is common on simulators. For best results, test on a real device."
+                        #else
+                        userMessage = "Apple authentication failed. Please verify:\n1. You're signed into iCloud in Settings\n2. Your app has 'Sign in with Apple' capability enabled\n3. Your App ID is properly configured on developer.apple.com"
+                        #endif
+                    } else {
+                        userMessage = "Sign in was cancelled or failed. Please try again."
+                    }
+                case 1001:
+                    userMessage = "Sign in failed. Please check your Apple ID settings and try again."
+                case 1002:
+                    userMessage = "Unknown error occurred. Please try again later."
+                case 1003:
+                    userMessage = "Sign in was cancelled by the system."
+                case 1004:
+                    userMessage = "Sign in not handled. Please update the app."
+                default:
+                    userMessage = "Sign in failed with error code \(nsError.code). Please try again."
+                }
+            } else if nsError.domain == "AKAuthenticationError" {
+                switch nsError.code {
+                case -7026:
+                    #if targetEnvironment(simulator)
+                    userMessage = "Apple ID authentication failed.\n\nSimulator tip: Ensure you're signed into iCloud in Settings → Apple ID. Consider testing on a real device for more reliable results."
+                    #else
+                    userMessage = "Apple authentication failed. Please verify:\n1. You're signed into iCloud in Settings\n2. Sign in with Apple capability is enabled in Xcode\n3. Your provisioning profile is up to date"
+                    #endif
+                default:
+                    userMessage = "Apple ID authentication error (code \(nsError.code)). Please check your Apple ID settings."
+                }
+            } else {
+                userMessage = error.localizedDescription
+            }
+            
+            authState = .error(userMessage)
             return
+            
         case .success(let authorization):
+            Log.ui.info("Sign in with Apple succeeded, processing credential...")
+            
             guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential else {
+                Log.ui.error("Invalid credential type received from Apple")
                 authState = .error(AppleAuthError.invalidCredentialType.localizedDescription)
                 return
             }
+            
+            Log.ui.info("Apple ID credential received for user: \(credential.user)")
+            
             guard let identityToken = credential.identityToken,
                   let tokenString = String(data: identityToken, encoding: .utf8) else {
+                Log.ui.error("Failed to extract identity token from Apple credential")
                 authState = .error(AppleAuthError.invalidAppleToken.localizedDescription)
                 return
             }
+            
+            Log.ui.info("Identity token extracted, length: \(tokenString.count)")
+            
             guard let rawNonce = pendingNonce else {
+                Log.ui.error("Missing nonce for Apple sign in completion")
                 authState = .error(AppleAuthError.missingNonce.localizedDescription)
                 return
             }
+
+            Log.ui.info("Starting JWT exchange with Databricks...")
+            // Safe to transition now: Apple's sheet has dismissed, the
+            // credential is in hand, and onCompletion has already fired —
+            // unmounting the button no longer risks dropping a delegate
+            // callback.
+            authState = .signingIn
 
             do {
                 let exchange = try await performExchange(
@@ -151,6 +245,9 @@ final class AppleSignInManager: ObservableObject {
                     userId: credential.user,
                     rawNonce: rawNonce
                 )
+                
+                Log.ui.info("JWT exchange successful, storing authentication (expires in \(exchange.expiresIn)s)")
+                
                 try storeAuthentication(
                     jwt: exchange.jwt,
                     expiresIn: exchange.expiresIn,
@@ -158,8 +255,11 @@ final class AppleSignInManager: ObservableObject {
                     email: credential.email,
                     fullName: credential.fullName
                 )
+                
+                Log.ui.info("Sign in with Apple completed successfully")
                 authState = .authenticated
             } catch {
+                Log.ui.error("JWT exchange or storage failed: \(error.localizedDescription)")
                 authState = .error(error.localizedDescription)
             }
         }
@@ -181,13 +281,42 @@ final class AppleSignInManager: ObservableObject {
         userId: String,
         rawNonce: String
     ) async throws -> (jwt: String, expiresIn: Int) {
+        // Check configuration before attempting network call
+        guard APIConfiguration.configuredBaseURL != nil else {
+            Log.api.error("JWT exchange: API base URL is not configured")
+            throw AppleAuthError.missingCredentials
+        }
+        
+        guard let configuredHost = APIConfiguration.configuredWorkspaceHost else {
+            Log.api.error("JWT exchange: Workspace host is not configured")
+            throw AppleAuthError.missingCredentials
+        }
+        
         let url = APIConfiguration.jwtExchangeURL
+        Log.api.info("JWT exchange: URL = \(url.absoluteString)")
+        Log.api.info("JWT exchange: Workspace host = \(configuredHost.absoluteString)")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = APIConfiguration.timeoutInterval
 
-        let spnToken = try await authService.bearerToken()
+        Log.api.info("JWT exchange: Requesting SPN bearer token...")
+        let spnToken: String
+        do {
+            let tokenStart = Date()
+            spnToken = try await authService.bearerToken()
+            let tokenDuration = Date().timeIntervalSince(tokenStart)
+            Log.api.info("JWT exchange: SPN bearer token obtained in \(String(format: "%.2f", tokenDuration))s (length: \(spnToken.count))")
+        } catch {
+            Log.api.error("JWT exchange: Failed to obtain SPN bearer token: \(error.localizedDescription)")
+            Log.api.error("JWT exchange: Error type: \(type(of: error))")
+            if let authError = error as? AuthError {
+                Log.api.error("JWT exchange: AuthError details: \(authError)")
+            }
+            throw error
+        }
+        
         request.setValue("Bearer \(spnToken)", forHTTPHeaderField: "Authorization")
 
         let body = JWTExchangeRequest(
@@ -196,20 +325,40 @@ final class AppleSignInManager: ObservableObject {
             userId: userId,
             deviceId: DeviceIdentifier.current
         )
-        request.httpBody = try JSONEncoder().encode(body)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        request.httpBody = try encoder.encode(body)
+        
+        Log.api.info("JWT exchange: Sending request to Databricks (userId: \(userId))")
+        Log.api.info("JWT exchange: Request headers: \(request.allHTTPHeaderFields ?? [:])")
+        if request.httpBody != nil {
+            // Log body shape but redact the actual token
+            Log.api.info("JWT exchange: Request body structure: appleIdToken (length: \(identityToken.count)), nonce, userId, deviceId")
+        }
 
+        let requestStart = Date()
         let (data, response) = try await urlSession.data(for: request)
+        let requestDuration = Date().timeIntervalSince(requestStart)
+        Log.api.info("JWT exchange: Request completed in \(String(format: "%.2f", requestDuration))s")
 
-        guard let http = response as? HTTPURLResponse,
-              (200...299).contains(http.statusCode) else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-            throw AppleAuthError.jwtExchangeFailed(statusCode: statusCode)
+        guard let http = response as? HTTPURLResponse else {
+            Log.api.error("JWT exchange: Response is not HTTP")
+            throw AppleAuthError.jwtExchangeFailed(statusCode: -1)
+        }
+        
+        Log.api.info("JWT exchange: Received response with status \(http.statusCode)")
+        
+        guard (200...299).contains(http.statusCode) else {
+            Log.api.error("JWT exchange: HTTP \(http.statusCode) - Response body: \(String(data: data, encoding: .utf8) ?? "(unable to decode)")")
+            throw AppleAuthError.jwtExchangeFailed(statusCode: http.statusCode)
         }
 
         let decoded: JWTExchangeResponse
         do {
             decoded = try JSONDecoder().decode(JWTExchangeResponse.self, from: data)
+            Log.api.info("JWT exchange: Successfully decoded response (expiresIn: \(decoded.expiresIn)s)")
         } catch {
+            Log.api.error("JWT exchange: Failed to decode response body: \(error.localizedDescription)")
             throw AppleAuthError.invalidExchangeResponse
         }
 
@@ -323,6 +472,19 @@ final class AppleSignInManager: ObservableObject {
     // MARK: - Helpers
 
     static let authenticatedUserKey = "authenticatedUser"
+    
+    /// Diagnostic function to check if OAuth credentials are properly configured
+    func checkOAuthCredentials() -> (hasClientID: Bool, hasClientSecret: Bool, clientIDLength: Int, secretLength: Int) {
+        let clientID = KeychainHelper.get(for: KeychainHelper.Key.databricksClientID) ?? ""
+        let clientSecret = KeychainHelper.get(for: KeychainHelper.Key.databricksClientSecret) ?? ""
+        
+        return (
+            hasClientID: !clientID.isEmpty,
+            hasClientSecret: !clientSecret.isEmpty,
+            clientIDLength: clientID.count,
+            secretLength: clientSecret.count
+        )
+    }
 
     static func generateNonce(length: Int = 32) -> String {
         precondition(length > 0)
