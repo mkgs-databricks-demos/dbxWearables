@@ -135,7 +135,14 @@ final class AppleSignInManager: ObservableObject {
         pendingNonce = nonce
         request.requestedScopes = [.fullName, .email]
         request.nonce = Self.sha256(nonce)
-        authState = .signingIn
+        // NOTE: do NOT flip `authState = .signingIn` here. SwiftUI's
+        // `SignInWithAppleButton` is backed by an `ASAuthorizationController`
+        // whose delegate is the button's coordinator. Switching state would
+        // unmount the button (the `.unauthenticated` arm) while Apple's
+        // system sheet is still presented — deallocating the coordinator and
+        // silently dropping the `onCompletion` callback. Apple's own sheet
+        // provides feedback during the auth flow; we transition to
+        // `.signingIn` only once we receive a credential to exchange.
         Log.ui.info("Sign in with Apple: Request prepared, presenting Apple UI...")
     }
 
@@ -226,7 +233,12 @@ final class AppleSignInManager: ObservableObject {
             }
 
             Log.ui.info("Starting JWT exchange with Databricks...")
-            
+            // Safe to transition now: Apple's sheet has dismissed, the
+            // credential is in hand, and onCompletion has already fired —
+            // unmounting the button no longer risks dropping a delegate
+            // callback.
+            authState = .signingIn
+
             do {
                 let exchange = try await performExchange(
                     identityToken: tokenString,
@@ -287,7 +299,7 @@ final class AppleSignInManager: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 30 // Add explicit timeout
+        request.timeoutInterval = APIConfiguration.timeoutInterval
 
         Log.api.info("JWT exchange: Requesting SPN bearer token...")
         let spnToken: String
@@ -319,8 +331,8 @@ final class AppleSignInManager: ObservableObject {
         
         Log.api.info("JWT exchange: Sending request to Databricks (userId: \(userId))")
         Log.api.info("JWT exchange: Request headers: \(request.allHTTPHeaderFields ?? [:])")
-        if let bodyData = request.httpBody, let bodyString = String(data: bodyData, encoding: .utf8) {
-            // Log body but redact the actual token
+        if request.httpBody != nil {
+            // Log body shape but redact the actual token
             Log.api.info("JWT exchange: Request body structure: appleIdToken (length: \(identityToken.count)), nonce, userId, deviceId")
         }
 

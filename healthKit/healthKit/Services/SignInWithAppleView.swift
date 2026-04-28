@@ -129,6 +129,15 @@ struct SignInWithAppleContent: View {
             Text("Signing in...")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+
+            // Apple's sheet sometimes dismisses without firing the completion
+            // callback (e.g. swipe-down gesture), leaving the app stuck in
+            // `.signingIn`. This escape hatch lets the user reset.
+            Button("Cancel") {
+                signInManager.resetForRetry()
+            }
+            .buttonStyle(DBXSecondaryButtonStyle())
+            .padding(.top, 8)
         }
         .frame(height: 200)
     }
