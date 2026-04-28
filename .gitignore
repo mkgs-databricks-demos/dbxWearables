@@ -28,3 +28,9 @@ node_modules/
 .idea/
 .vscode/
 .cursor/
+
+# Claude Code local state
+.claude/
+
+# Sibling/scratch projects that landed in the tree
+wearables-0bus-gateway/
